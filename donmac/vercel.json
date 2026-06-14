@@ -1,9 +1,8 @@
 {
+  "cleanUrls": true,
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
-    { "source": "/favicon.ico", "destination": "/favicon.ico" },
-    { "source": "/assets/(.*)", "destination": "/assets/$1" },
-    { "source": "/((?!api|assets|favicon.ico).*)", "destination": "/index.html" }
+    { "source": "/((?!api|favicon.ico|assets).*)", "destination": "/index.html" }
   ],
   "headers": [
     {
