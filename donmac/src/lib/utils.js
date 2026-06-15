@@ -1,7 +1,9 @@
 export function generateRef() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
   let ref = ''
-  for (let i = 0; i < 6; i++) ref += chars[Math.floor(Math.random() * chars.length)]
+  for (let i = 0; i < 6; i++) {
+    ref += chars[Math.floor(Math.random() * chars.length)]
+  }
   return ref
 }
 
@@ -28,18 +30,26 @@ export function formatDateShort(d) {
 
 export function timeAgo(d) {
   if (!d) return ''
-  const seconds = Math.floor((Date.now() - new Date(d).getTime()) / 1000)
+  
+  // Math.max fixes device synchronization delay discrepancies
+  const diffMs = Date.now() - new Date(d).getTime()
+  const seconds = Math.floor(Math.max(0, diffMs) / 1000)
+  
   if (seconds < 60) return 'just now'
+  
   const minutes = Math.floor(seconds / 60)
   if (minutes < 60) return `${minutes}m ago`
+  
   const hours = Math.floor(minutes / 60)
   if (hours < 24) return `${hours}h ago`
+  
   const days = Math.floor(hours / 24)
   return `${days}d ago`
 }
 
 export function cls(...args) {
-  return args.filter(Boolean).join(' ')
+  // .flatMap handles arrays or conditional structures cleanly without leaving double whitespace gaps
+  return args.flat().filter(Boolean).map(str => String(str).trim()).join(' ')
 }
 
 export const STATUS_CONFIG = {
