@@ -1,7 +1,7 @@
 export default async function handler(req, res) {
   // Ensure we only handle POST requests
   if (req.method !== 'POST') {
-    return res.status(455).json({ error: 'Method not allowed' })
+    return res.status(405).json({ error: 'Method not allowed' })
   }
 
   try {
@@ -19,62 +19,101 @@ export default async function handler(req, res) {
     
     // 4. Extract parameters from your request body
     const { action, userId, amount } = req.body
+    
+    // Validate required fields
     if (!userId || !action) {
       return res.status(400).json({ error: 'Missing mandatory fields: userId or action' })
     }
 
-    // 5. Fetch target user profile balance
-    const { data: profile, error: fetchError } = await supabaseAdmin
-      .from('profiles')
-      .select('balance')
-      .eq('id', userId)
-      .single()
-
-    if (fetchError || !profile) {
-      return res.status(404).json({ error: 'Target user profile not found' })
+    // Validate amount for financial actions
+    if ((action === 'credit' || action === 'debit') && (!amount || isNaN(Number(amount)) || Number(amount) <= 0)) {
+      return res.status(400).json({ error: 'Valid amount is required for credit/debit operations' })
     }
 
-    // 6. Process financial logic cleanly
-    const currentBalance = Number(profile.balance || 0)
-    const numericAmount = Number(amount || 0)
-    let newBalance = currentBalance
-
-    if (action === 'credit') {
-      newBalance = currentBalance + numericAmount
-    } else if (action === 'debit') {
-      newBalance = Math.max(0, currentBalance - numericAmount) // Prevent negative balances
-    } else if (action === 'block' || action === 'unblock') {
-      // Handle account status updating
+    // 5. Handle different actions
+    if (action === 'block' || action === 'unblock') {
       const targetStatus = action === 'block' ? 'blocked' : 'active'
       const { error: statusError } = await supabaseAdmin
         .from('profiles')
-        .update({ status: targetStatus })
+        .update({ status: targetStatus, updated_at: new Date().toISOString() })
         .eq('id', userId)
 
       if (statusError) throw statusError
       return res.status(200).json({ message: `User status changed to ${targetStatus} successfully` })
-    } else if (action === 'delete') {
-      // Optional: Delete user from public profile and auth table
-      const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(userId)
-      if (deleteError) throw deleteError
-      return res.status(200).json({ message: 'User deleted successfully from auth instance' })
-    } else {
-      return res.status(400).json({ error: 'Invalid action provided' })
+    } 
+    
+    if (action === 'delete') {
+      // Delete user from auth and profiles
+      const { error: deleteAuthError } = await supabaseAdmin.auth.admin.deleteUser(userId)
+      if (deleteAuthError) throw deleteAuthError
+      
+      // Also delete from profiles if not automatically deleted by trigger
+      const { error: deleteProfileError } = await supabaseAdmin
+        .from('profiles')
+        .delete()
+        .eq('id', userId)
+      
+      if (deleteProfileError) console.warn('Profile deletion warning:', deleteProfileError)
+      
+      return res.status(200).json({ message: 'User deleted successfully' })
     }
-
-    // 7. Commit new balance back to the database
-    const { error: updateError } = await supabaseAdmin
-      .from('profiles')
-      .update({ balance: newBalance })
-      .eq('id', userId)
-
-    if (updateError) throw updateError
-
-    return res.status(200).json({ 
-      message: `Wallet updated successfully`, 
-      previousBalance: currentBalance, 
-      newBalance 
-    })
+    
+    if (action === 'credit' || action === 'debit') {
+      // Use transaction for balance updates to prevent race conditions
+      const numericAmount = Number(amount)
+      let newBalance
+      let operationError
+      
+      // For debit, check if sufficient funds exist first
+      if (action === 'debit') {
+        const { data: profile, error: fetchError } = await supabaseAdmin
+          .from('profiles')
+          .select('balance')
+          .eq('id', userId)
+          .single()
+          
+        if (fetchError || !profile) {
+          return res.status(404).json({ error: 'Target user profile not found' })
+        }
+        
+        if (Number(profile.balance) < numericAmount) {
+          return res.status(400).json({ error: 'Insufficient balance for debit operation' })
+        }
+      }
+      
+      // Perform the update with atomic operation
+      if (action === 'credit') {
+        const { data, error } = await supabaseAdmin.rpc('credit_user_balance', {
+          user_id: userId,
+          credit_amount: numericAmount
+        })
+        operationError = error
+        if (!error) newBalance = data
+      } else {
+        const { data, error } = await supabaseAdmin.rpc('debit_user_balance', {
+          user_id: userId,
+          debit_amount: numericAmount
+        })
+        operationError = error
+        if (!error) newBalance = data
+      }
+      
+      if (operationError) throw operationError
+      
+      // Get final balance for response
+      const { data: finalProfile } = await supabaseAdmin
+        .from('profiles')
+        .select('balance')
+        .eq('id', userId)
+        .single()
+      
+      return res.status(200).json({ 
+        message: `Wallet ${action}ed successfully`, 
+        newBalance: finalProfile?.balance || newBalance
+      })
+    }
+    
+    return res.status(400).json({ error: 'Invalid action provided' })
 
   } catch (err) {
     console.error('⚠️ Admin endpoint execution error:', err.message)
@@ -82,7 +121,6 @@ export default async function handler(req, res) {
   }
 }
 
-// Adjust your helper slightly to expect the raw, cleaned JWT string directly
 async function verifyAdmin(cleanJwt) {
   if (!cleanJwt) throw new Error('Missing authentication token string')
   
@@ -91,13 +129,13 @@ async function verifyAdmin(cleanJwt) {
     throw new Error('Invalid session validation')
   }
 
-  const { data: p } = await supabaseAdmin
+  const { data: p, error: profileError } = await supabaseAdmin
     .from('profiles')
     .select('role')
     .eq('id', data.user.id)
     .single()
 
-  if (p?.role !== 'admin') {
+  if (profileError || p?.role !== 'admin') {
     throw new Error('Admin access tier required')
   }
 
