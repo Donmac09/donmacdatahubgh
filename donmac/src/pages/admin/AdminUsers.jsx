@@ -31,13 +31,15 @@ export default function AdminUsers() {
   const [creditType, setCreditType] = useState('credit')
   const [actionLoading, setActionLoading] = useState(false)
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { 
+    load() 
+  }, [])
 
   async function load() {
     setLoading(true)
     try {
       const data = await getAllUsers()
-      setUsers(data)
+      setUsers(data || [])
     } catch (e) {
       toast.error('Failed to load users: ' + e.message)
     } finally {
@@ -48,6 +50,7 @@ export default function AdminUsers() {
   async function handleCredit() {
     const amt = parseFloat(creditAmt)
     if (!amt || amt <= 0) { toast.error('Enter a valid amount'); return }
+    
     setActionLoading(true)
     try {
       await adminApiCall('/api/admin/update-user', {
@@ -55,10 +58,21 @@ export default function AdminUsers() {
         userId: creditModal.id,
         amount: amt,
       })
+      
       toast.success(`₵${amt.toFixed(2)} ${creditType === 'credit' ? 'added to' : 'deducted from'} ${creditModal.name}'s wallet`)
+      
+      // Update targeted row locally to dodge unnecessary network layout layout thrashing
+      setUsers(prev => prev.map(u => {
+        if (u.id === creditModal.id) {
+          const currentBal = u.balance || 0
+          const updatedBal = creditType === 'credit' ? currentBal + amt : currentBal - amt
+          return { ...u, balance: updatedBal }
+        }
+        return u
+      }))
+
       setCreditModal(null)
       setCreditAmt('')
-      load()
     } catch (e) {
       toast.error(e.message)
     } finally {
@@ -68,10 +82,13 @@ export default function AdminUsers() {
 
   async function handleBlock(user) {
     const action = user.status === 'blocked' ? 'unblock' : 'block'
+    const nextStatus = action === 'block' ? 'blocked' : 'active'
+    
     try {
       await adminApiCall('/api/admin/update-user', { action, userId: user.id })
       toast.success(`${user.name} ${action === 'block' ? 'blocked' : 'unblocked'}`)
-      load()
+      
+      setUsers(prev => prev.map(u => u.id === user.id ? { ...u, status: nextStatus } : u))
     } catch (e) {
       toast.error(e.message)
     }
@@ -82,7 +99,8 @@ export default function AdminUsers() {
     try {
       await adminApiCall('/api/admin/update-user', { action: 'delete', userId: user.id })
       toast.success(`${user.name} deleted`)
-      load()
+      
+      setUsers(prev => prev.filter(u => u.id !== user.id))
     } catch (e) {
       toast.error(e.message)
     }
@@ -91,7 +109,9 @@ export default function AdminUsers() {
   const filtered = users.filter(u => {
     if (search) {
       const s = search.toLowerCase()
-      if (!u.name?.toLowerCase().includes(s) && !u.email?.toLowerCase().includes(s) && !u.phone?.includes(search)) return false
+      if (!u.name?.toLowerCase().includes(s) && 
+          !u.email?.toLowerCase().includes(s) && 
+          !u.phone?.includes(search)) return false
     }
     if (roleFilter && u.role !== roleFilter) return false
     return true
@@ -118,7 +138,9 @@ export default function AdminUsers() {
           <option value="reseller">Reseller</option>
           <option value="customer">Customer</option>
         </select>
-        <span className="text-sm text-gray-400 self-center">{filtered.length} user{filtered.length !== 1 ? 's' : ''}</span>
+        <span className="text-sm text-gray-400 self-center">
+          {filtered.length} user{filtered.length !== 1 ? 's' : ''}
+        </span>
       </div>
 
       <Card className="p-0 overflow-hidden">
@@ -144,7 +166,7 @@ export default function AdminUsers() {
                   </span>
                 </Td>
                 <Td className="text-xs text-gray-400">{u.reseller?.name || '—'}</Td>
-                <Td><span className="font-bold text-indigo-600">{formatCurrency(u.balance)}</span></Td>
+                <Td><span className="font-bold text-indigo-600">{formatCurrency(u.balance || 0)}</span></Td>
                 <Td><span className="font-semibold text-emerald-600">{formatCurrency(u.profit || 0)}</span></Td>
                 <Td><StatusBadge status={u.status || 'active'} /></Td>
                 <Td className="text-xs text-gray-400 whitespace-nowrap">{formatDate(u.created_at)}</Td>
@@ -190,7 +212,6 @@ export default function AdminUsers() {
           size="sm"
         >
           <div className="space-y-4">
-            {/* Toggle credit/debit */}
             <div className="flex gap-2 p-1 bg-gray-100 rounded-xl">
               <button
                 onClick={() => setCreditType('credit')}
@@ -208,7 +229,7 @@ export default function AdminUsers() {
 
             <div className="bg-gray-50 rounded-xl px-4 py-3 text-sm">
               <span className="text-gray-500">Current balance: </span>
-              <span className="font-bold text-indigo-600">{formatCurrency(creditModal.balance)}</span>
+              <span className="font-bold text-indigo-600">{formatCurrency(creditModal.balance || 0)}</span>
             </div>
 
             <Input
