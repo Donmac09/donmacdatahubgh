@@ -5,17 +5,17 @@ import { Btn } from './ui'
 // Define the branding assets mapped to your group.networkKey
 const NETWORK_BRANDING = {
   mtn: {
-    logo: 'https://images.unsplash.com/photo-1650346387034-2e9b0429f6db?auto=format&fit=crop&w=80&q=80', // Replace with your local asset path (e.g., /images/mtn-logo.png)
+    logo: 'https://tse3.mm.bing.net/th/id/OIP.twD5QvZjX6mFxVPBlIcQqAHaE_?rs=1&pid=ImgDetMain&o=7&rm=3', // Replace with your local asset path (e.g., /images/mtn-logo.png)
     fallbackChar: 'M',
     brandColor: '#B38F00'
   },
   telecel: {
-    logo: 'https://images.unsplash.com/photo-1650346387034-2e9b0429f6db?auto=format&fit=crop&w=80&q=80', // Replace with your local asset path
+    logo: 'https://tse2.mm.bing.net/th/id/OIP._V9CkKDi23oI4p9VRjvu9wHaHa?rs=1&pid=ImgDetMain&o=7&rm=3', // Replace with your local asset path
     fallbackChar: 'T',
     brandColor: '#C01020'
   },
   airtel: {
-    logo: 'https://images.unsplash.com/photo-1650346387034-2e9b0429f6db?auto=format&fit=crop&w=80&q=80', // Replace with your local asset path
+    logo: 'https://agent.bestdealsgh.com/wp-content/uploads/2024/10/tigo.jpeg', // Replace with your local asset path
     fallbackChar: 'A',
     brandColor: '#1d4ed8'
   }
