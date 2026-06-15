@@ -4,9 +4,9 @@ import { createClient } from '@supabase/supabase-js'
 const supabaseUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '').trim()
 const supabaseServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey)
+// Defined explicitly as supabaseAdmin here:
+const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey)
 
-// Protected layout words to ignore during 6-character token evaluation
 const BLOCKED_TOKENS = new Set([
   'AMOUNT', 'STATUS', 'MOBILE', 'BALANC', 'VOLUME', 'MASHUP', 
   'PREMIU', 'BUNDLE', 'VODAFO', 'TELECE', 'AIRTEL', 'MOMOPY'
@@ -16,40 +16,28 @@ function parseSMS(text) {
   const result = { amount: null, txId: null, refCode: null, network: 'MoMo', possibleRefs: [] }
   if (!text) return result
 
-  // 1. Precise Financial Processing (Handles GHS 50.00, GHS50, 50.00 GHS)
   const amountMatch = text.match(/GHS\s*([0-9]+(?:\.[0-9]{1,2})?)/i) || 
                       text.match(/([0-9]+(?:\.[0-9]{1,2})?)\s*GHS/i)
-  if (amountMatch) {
-    result.amount = parseFloat(amountMatch[1])
-  }
+  if (amountMatch) result.amount = parseFloat(amountMatch[1])
 
-  // 2. Transaction ID Fingerprinting (MTN / Telecel / AT alphanumeric strings)
-  // Catches standard alphanumeric strings between 9-12 digits or long numerical sequences
   const txMatch = text.match(/\b([A-Z0-9]{9,14})\b/i) || 
                   text.match(/(?:txn|transaction|id)[:\s#]*([0-9A-Z]+)/i)
-  if (txMatch) {
-    result.txId = txMatch[1].toUpperCase()
-  }
+  if (txMatch) result.txId = txMatch[1].toUpperCase()
 
-  // 3. User Reference Token Validation
   const allSixCharMatches = text.match(/\b([A-Z0-9]{6})\b/gi)
   if (allSixCharMatches) {
     const cleanTokens = allSixCharMatches
       .map(t => t.toUpperCase())
       .filter(t => {
-        // Drop purely numerical times (like 114522 from timestamps) or system keywords
         if (/^\d+$/.test(t)) return false
         if (BLOCKED_TOKENS.has(t)) return false
         return true
       })
 
-    result.possibleRefs = [...new Set(cleanTokens)] // Deduplicate matching targets
-    if (result.possibleRefs.length > 0) {
-      result.refCode = result.possibleRefs[0] // Set initial match target
-    }
+    result.possibleRefs = [...new Set(cleanTokens)]
+    if (result.possibleRefs.length > 0) result.refCode = result.possibleRefs[0]
   }
 
-  // 4. Network Structural Routing
   const lowerText = text.toLowerCase()
   if (lowerText.includes('mtn') || lowerText.includes('mobile money') || lowerText.includes('momo')) {
     result.network = 'MTN MoMo'
@@ -70,7 +58,6 @@ export default async function handler(req, res) {
   try {
     const body = req.method === 'POST' ? req.body : req.query
     const rawSms = body.message || body.sms || body.text || body.body || ''
-    const fromSender = body.from || body.sender || body.number || ''
 
     if (!rawSms.trim()) {
       return res.status(400).json({ error: 'Payload body cannot be blank' })
@@ -79,9 +66,8 @@ export default async function handler(req, res) {
     const parsed = parseSMS(rawSms)
     console.log('Processed Vector:', { txId: parsed.txId, amount: parsed.amount, targets: parsed.possibleRefs })
 
-    // Deduplicate: If transaction ID exists, make sure it hasn't already been processed or logged
     if (parsed.txId) {
-      const { data: existingTx } = await supabase
+      const { data: existingTx } = await supabaseAdmin
         .from('topups')
         .select('id, status, user_id')
         .eq('transaction_id', parsed.txId)
@@ -91,7 +77,6 @@ export default async function handler(req, res) {
         if (existingTx.status === 'claimed') {
           return res.status(200).json({ success: true, message: 'Transaction identity previously settled' })
         }
-        // If it is logged but unclaimed, skip logging duplicate rows and terminate early
         if (existingTx.status === 'unclaimed' && parsed.possibleRefs.length === 0) {
           return res.status(200).json({ success: true, message: 'Unclaimed record logged' })
         }
@@ -101,9 +86,8 @@ export default async function handler(req, res) {
     let credited = false
     let creditedUserId = null
 
-    // Loop through candidates to confirm an active matching ledger
     for (const token of parsed.possibleRefs) {
-      const { data: topupRows } = await supabase
+      const { data: topupRows } = await supabaseAdmin
         .from('topups')
         .select('*')
         .eq('reference_code', token)
@@ -115,10 +99,7 @@ export default async function handler(req, res) {
         const targetUser = matchingTopup.user_id
 
         if (targetUser && parsed.amount && parsed.amount > 0) {
-          
-          // --- BEGIN TRANSACTION LAYER ---
-          // Fetch user profile securely using master key bypass
-          const { data: profile } = await supabase
+          const { data: profile } = await supabaseAdmin
             .from('profiles')
             .select('balance')
             .eq('id', targetUser)
@@ -127,14 +108,12 @@ export default async function handler(req, res) {
           const originalBalance = Number(profile?.balance || 0)
           const finalizedBalance = originalBalance + parsed.amount
 
-          // 1. Commit new account summary calculations
-          await supabase
+          await supabaseAdmin
             .from('profiles')
             .update({ balance: finalizedBalance })
             .eq('id', targetUser)
 
-          // 2. Shift state flags on internal request row to avoid execution looping
-          await supabase
+          await supabaseAdmin
             .from('topups')
             .update({
               status: 'claimed',
@@ -146,8 +125,7 @@ export default async function handler(req, res) {
             })
             .eq('id', matchingTopup.id)
 
-          // 3. Document explicit audit logs
-          await supabase.from('transactions').insert({
+          await supabaseAdmin.from('transactions').insert({
             user_id: targetUser,
             type: 'credit',
             description: `Auto-topup via system web gateway. Ref token: [${token}]. Network Trx ID: ${parsed.txId || 'N/A'}`,
@@ -155,25 +133,22 @@ export default async function handler(req, res) {
             status: 'success'
           })
 
-          // 4. Fire notifications summary
-          await supabase.from('notifications').insert({
+          await supabaseAdmin.from('notifications').insert({
             user_id: targetUser,
             title: 'Wallet Credited! 💰',
             message: `₵${parsed.amount.toFixed(2)} added to your wallet layout dynamically.`,
             type: 'topup'
           })
-          // --- END TRANSACTION LAYER ---
 
           credited = true
           creditedUserId = targetUser
-          break // Escape evaluation matrix immediately upon successful match
+          break
         }
       }
     }
 
-    // Save fallback entry for manually auditing or verifying missing transactions
     if (!credited) {
-      await supabase.from('topups').insert({
+      await supabaseAdmin.from('topups').insert({
         reference_code: parsed.refCode || null,
         transaction_id: parsed.txId || null,
         amount: parsed.amount || null,
@@ -188,11 +163,7 @@ export default async function handler(req, res) {
       success: true,
       credited,
       user_id: creditedUserId,
-      extracted: {
-        amount: parsed.amount,
-        txId: parsed.txId,
-        refCode: parsed.refCode
-      }
+      extracted: { amount: parsed.amount, txId: parsed.txId, refCode: parsed.refCode }
     })
 
   } catch (globalError) {
