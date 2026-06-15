@@ -10,72 +10,109 @@ export default function AdminResellers() {
   const [showCreate, setShowCreate] = useState(false)
   const [form, setForm] = useState({ name: '', email: '', phone: '', password: '' })
   const [creating, setCreating] = useState(false)
+  const [formError, setFormError] = useState('')
 
   useEffect(() => { load() }, [])
 
   async function load() {
+    setLoading(true)
     try {
-      const { data } = await supabase.from('profiles')
+      const { data, error } = await supabase
+        .from('profiles')
         .select('*, store:stores(*)')
         .eq('role', 'reseller')
         .order('created_at', { ascending: false })
+      if (error) throw error
       setResellers(data || [])
-    } catch {} finally { setLoading(false) }
+    } catch (e) {
+      toast.error('Failed to load resellers: ' + e.message)
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function handleCreate() {
-    if (!form.name || !form.email || !form.phone || !form.password) { toast.error('All fields required'); return }
+    setFormError('')
+    const { name, email, phone, password } = form
+
+    // Client-side validation
+    if (!name.trim()) { setFormError('Full name is required'); return }
+    if (!email.trim() || !email.includes('@')) { setFormError('Valid email is required'); return }
+    if (!phone.trim() || phone.length < 10) { setFormError('Valid phone number is required'); return }
+    if (!password || password.length < 6) { setFormError('Password must be at least 6 characters'); return }
+
     setCreating(true)
     try {
-      // Create auth user
-      const { data, error } = await supabase.auth.admin.createUser({
-        email: form.email, password: form.password,
-        user_metadata: { name: form.name, phone: form.phone, role: 'reseller' },
-        email_confirm: true
+      // Get the current session JWT to authenticate the API call
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) throw new Error('Not authenticated. Please log in again.')
+
+      // Call our secure Vercel serverless endpoint
+      const response = await fetch('/api/admin/create-user', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ name: name.trim(), email: email.trim().toLowerCase(), phone: phone.trim(), password, role: 'reseller' }),
       })
-      if (error) throw error
-      toast.success('Reseller created! They can now log in.')
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || `Server error (${response.status})`)
+      }
+
+      toast.success(result.message || 'Reseller created successfully!')
       setShowCreate(false)
       setForm({ name: '', email: '', phone: '', password: '' })
-      load()
+      setFormError('')
+      // Reload list after a short delay for DB trigger to complete
+      setTimeout(() => load(), 800)
+
     } catch (e) {
-      // Fallback: insert directly into profiles (requires service role in real app)
-      try {
-        await supabase.from('profiles').insert({
-          id: crypto.randomUUID(), name: form.name, phone: form.phone,
-          role: 'reseller', balance: 0, profit: 0, status: 'active'
-        })
-        toast.success('Reseller profile created (use Supabase Auth to set email/password)')
-        setShowCreate(false)
-        load()
-      } catch (e2) { toast.error(e.message) }
-    } finally { setCreating(false) }
+      setFormError(e.message)
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  function handleClose() {
+    setShowCreate(false)
+    setFormError('')
+    setForm({ name: '', email: '', phone: '', password: '' })
   }
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-500">{resellers.length} reseller{resellers.length !== 1 ? 's' : ''}</p>
         <Btn onClick={() => setShowCreate(true)} size="sm">+ Create Reseller</Btn>
       </div>
 
       <Card className="p-0 overflow-hidden">
         {loading ? (
-          <div className="flex justify-center py-16"><div className="w-8 h-8 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" /></div>
+          <div className="flex justify-center py-16">
+            <div className="w-8 h-8 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
+          </div>
         ) : resellers.length === 0 ? (
-          <Empty icon="🏪" title="No resellers yet" description="Create resellers to get started" />
+          <Empty icon="🏪" title="No resellers yet" description="Create a reseller to get started" />
         ) : (
           <Table headers={['Name', 'Phone', 'Balance', 'Profit', 'Store', 'Status', 'Joined']}>
             {resellers.map(r => (
-              <tr key={r.id} className="hover:bg-gray-50">
+              <tr key={r.id} className="hover:bg-gray-50 transition-colors">
                 <Td className="font-semibold">{r.name}</Td>
                 <Td>{r.phone}</Td>
                 <Td className="font-bold text-indigo-600">{formatCurrency(r.balance)}</Td>
                 <Td className="font-semibold text-emerald-600">{formatCurrency(r.profit || 0)}</Td>
                 <Td>
                   {r.store ? (
-                    <span className="text-xs text-emerald-600 font-semibold">✓ {r.store.name}</span>
+                    <div>
+                      <span className="text-xs text-emerald-600 font-semibold">✓ {r.store.name}</span>
+                      <p className="text-[10px] text-gray-400">/{r.store.slug}</p>
+                    </div>
                   ) : (
-                    <span className="text-xs text-gray-400">Not created</span>
+                    <span className="text-xs text-gray-400 italic">No store yet</span>
                   )}
                 </Td>
                 <Td><StatusBadge status={r.status || 'active'} /></Td>
@@ -87,16 +124,62 @@ export default function AdminResellers() {
       </Card>
 
       {showCreate && (
-        <Modal title="Create Reseller" onClose={() => setShowCreate(false)} size="sm">
+        <Modal title="🏪 Create New Reseller" onClose={handleClose} size="sm">
           <div className="space-y-4">
-            <Input label="Full Name" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g. Kwame Mensah" icon="👤" />
-            <Input label="Email" type="email" value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} placeholder="reseller@email.com" icon="✉️" />
-            <Input label="Phone" value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} placeholder="0XX XXX XXXX" icon="📞" />
-            <Input label="Password" type="password" value={form.password} onChange={e => setForm(p => ({ ...p, password: e.target.value }))} placeholder="Min 8 characters" icon="🔒" />
-            <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-xs text-amber-700">
-              ⚠️ This requires Supabase service role key to create auth users directly. Alternatively, share the storefront link so resellers can self-register.
+            {/* Info box */}
+            <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
+              <p className="text-xs text-blue-700 font-medium">
+                ℹ️ The reseller will be able to log in immediately with these credentials. No email verification needed.
+              </p>
             </div>
-            <Btn onClick={handleCreate} loading={creating} className="w-full" size="lg">Create Reseller</Btn>
+
+            <Input
+              label="Full Name *"
+              value={form.name}
+              onChange={e => { setForm(p => ({ ...p, name: e.target.value })); setFormError('') }}
+              placeholder="e.g. Kwame Mensah"
+              icon="👤"
+            />
+            <Input
+              label="Email Address *"
+              type="email"
+              value={form.email}
+              onChange={e => { setForm(p => ({ ...p, email: e.target.value })); setFormError('') }}
+              placeholder="reseller@example.com"
+              icon="✉️"
+            />
+            <Input
+              label="Phone Number *"
+              type="tel"
+              value={form.phone}
+              onChange={e => { setForm(p => ({ ...p, phone: e.target.value })); setFormError('') }}
+              placeholder="0XX XXX XXXX"
+              icon="📞"
+            />
+            <Input
+              label="Password *"
+              type="password"
+              value={form.password}
+              onChange={e => { setForm(p => ({ ...p, password: e.target.value })); setFormError('') }}
+              placeholder="Min. 6 characters"
+              icon="🔒"
+            />
+
+            {/* Error display */}
+            {formError && (
+              <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+                <p className="text-red-600 text-sm font-medium">⚠️ {formError}</p>
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-1">
+              <Btn onClick={handleCreate} loading={creating} className="flex-1" size="lg">
+                {creating ? 'Creating...' : 'Create Reseller'}
+              </Btn>
+              <Btn onClick={handleClose} variant="secondary" size="lg" className="flex-1">
+                Cancel
+              </Btn>
+            </div>
           </div>
         </Modal>
       )}
