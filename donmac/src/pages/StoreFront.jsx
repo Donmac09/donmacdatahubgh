@@ -14,7 +14,7 @@ import CartDrawer from '../components/CartDrawer'
 import toast from 'react-hot-toast'
 
 // ─── Auth Screen ───────────────────────────────────────────────
-function StoreAuthScreen({ store, onAuth }) {
+export function StoreAuthScreen({ store, onAuth }) {
   const { login, register } = useAuthStore()
   const [mode, setMode] = useState('login')
   const [form, setForm] = useState({ email: '', password: '', name: '', phone: '' })
@@ -27,7 +27,6 @@ function StoreAuthScreen({ store, onAuth }) {
     try {
       if (mode === 'login') {
         const p = await login(form.email, form.password)
-        // Customer must belong to this reseller OR be the reseller/admin themselves
         if (p.role === 'customer' && p.reseller_id !== store.reseller_id) {
           await useAuthStore.getState().logout()
           setErr('This account is not registered under this store. Please register or use the correct store link.')
@@ -52,23 +51,20 @@ function StoreAuthScreen({ store, onAuth }) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 flex items-center justify-center p-4">
-      {/* Blobs */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-1/4 left-1/4 w-72 h-72 bg-indigo-500/10 rounded-full blur-3xl animate-pulse" />
         <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
       </div>
 
       <div className="relative w-full max-w-md animate-slide-up">
-        {/* Store branding */}
         <div className="text-center mb-8">
           <div className="w-20 h-20 mx-auto rounded-3xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-4xl shadow-2xl mb-4 animate-float">🏪</div>
           <h1 className="text-3xl font-black text-white">{store.name}</h1>
           {store.welcome && <p className="text-slate-400 text-sm mt-2 max-w-xs mx-auto leading-relaxed">"{store.welcome}"</p>}
-          <p className="text-slate-500 text-xs mt-2">Powered by Donmac Data Hub</p>
+          <p className="text-slate-500 text-xs mt-2">Powered by Your Data Hub Platform</p>
         </div>
 
         <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl">
-          {/* Mode tabs */}
           <div className="flex gap-1 bg-white/5 rounded-xl p-1 mb-6">
             {[['login', 'Sign In'], ['register', 'Register']].map(([m, l]) => (
               <button key={m} onClick={() => { setMode(m); setErr('') }}
@@ -125,7 +121,7 @@ function StoreAuthScreen({ store, onAuth }) {
 }
 
 // ─── Store Dashboard (logged-in) ────────────────────────────────
-function StoreDashboard({ store, resellerId, whatsapp }) {
+export default function StoreDashboard({ store, resellerId, whatsapp }) {
   const { profile, logout, refreshProfile } = useAuthStore()
   const { open: cartOpen, setOpen: setCartOpen, items: cartItems } = useCartStore()
   const [page, setPage] = useState('home')
@@ -134,26 +130,30 @@ function StoreDashboard({ store, resellerId, whatsapp }) {
   const [pkgConfig, setPkgConfig] = useState([])
   const [buyState, setBuyState] = useState(null)
   const [now, setNow] = useState(new Date())
-  // Orders
+  
+  // Orders, Topups, Transactions Data States
   const [orders, setOrders] = useState([])
   const [orderDateFrom, setOrderDateFrom] = useState('')
   const [orderDateTo, setOrderDateTo] = useState('')
-  // TopUps
   const [topups, setTopups] = useState([])
   const [topupDateFrom, setTopupDateFrom] = useState('')
   const [topupDateTo, setTopupDateTo] = useState('')
-  const [showTopup, setShowTopup] = useState(false)
-  const [showRef, setShowRef] = useState(false)
-  const [showClaim, setShowClaim] = useState(false)
-  const [myRef] = useState(generateRef())
-  const [claimTxId, setClaimTxId] = useState('')
-  const [claimLoading, setClaimLoading] = useState(false)
-  // Transactions
   const [txs, setTxs] = useState([])
   const [txDateFrom, setTxDateFrom] = useState('')
   const [txDateTo, setTxDateTo] = useState('')
-  // Profile
+  
+  // Modal toggle views
+  const [showTopup, setShowTopup] = useState(false)
+  const [showRef, setShowRef] = useState(false)
+  const [showClaim, setShowClaim] = useState(false)
+  const [claimTxId, setClaimTxId] = useState('')
+  const [claimLoading, setClaimLoading] = useState(false)
   const [pwForm, setPwForm] = useState({ current: '', newPw: '', confirm: '' })
+
+  // 🔐 STABLE REFERENCE CODE: Uses user details instead of dynamic random strings on refresh
+  const myRef = profile?.api_token 
+    ? profile.api_token.slice(-6).toUpperCase() 
+    : (profile?.id ? profile.id.slice(0, 6).toUpperCase() : 'REF-ERR')
 
   useEffect(() => {
     loadData()
@@ -188,13 +188,21 @@ function StoreDashboard({ store, resellerId, whatsapp }) {
       const { data: topup, error } = await supabase.from('topups').select('*').eq('transaction_id', claimTxId.trim()).single()
       if (error || !topup) throw new Error('Transaction ID not found. Contact the store owner.')
       if (topup.status === 'claimed') throw new Error('This transaction has already been claimed.')
+      
       await supabase.from('topups').update({ status: 'claimed', claimed_by: profile.id, user_id: profile.id }).eq('id', topup.id)
       const newBal = (profile.balance || 0) + topup.amount
       await supabase.from('profiles').update({ balance: newBal }).eq('id', profile.id)
-      await supabase.from('transactions').insert({ user_id: profile.id, type: 'credit', description: 'Manual claim TxID: ' + claimTxId, amount: topup.amount, status: 'success' })
+      await supabase.from('transactions').insert({ 
+        user_id: profile.id, 
+        type: 'credit', 
+        description: 'Manual claim TxID: ' + claimTxId, 
+        amount: topup.amount, 
+        status: 'success' 
+      })
+      
       await refreshProfile()
-      sounds.topup()
-      toast.success(`₵${topup.amount} claimed!`)
+      if (sounds?.topup) sounds.topup()
+      toast.success(`₵${topup.amount} claimed successfully!`)
       setShowClaim(false); setClaimTxId('')
       loadData()
     } catch (e) { toast.error(e.message) } finally { setClaimLoading(false) }
@@ -205,7 +213,6 @@ function StoreDashboard({ store, resellerId, whatsapp }) {
     return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
   }
 
-  // Nav items — no My Store, no Admin
   const navItems = [
     { id: 'home', icon: '🏠', label: 'Home' },
     { id: 'orders', icon: '📦', label: 'Orders' },
@@ -230,31 +237,25 @@ function StoreDashboard({ store, resellerId, whatsapp }) {
     return true
   })
 
-  const waNumber = `233${whatsapp.replace(/^0/, '')}`
-
   return (
     <div className="min-h-screen bg-gray-50 flex font-sans">
-      {/* Mobile overlay */}
       {sidebarOpen && <div className="fixed inset-0 bg-black/50 z-20 lg:hidden" onClick={() => setSidebarOpen(false)} />}
 
       {/* Sidebar */}
       <aside className={`fixed left-0 top-0 h-screen z-30 flex flex-col bg-gradient-to-b from-slate-900 to-slate-800 border-r border-white/5 transition-all duration-300 w-56 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
-        {/* Store branding */}
         <div className="flex items-center gap-3 px-4 py-5 border-b border-white/10">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-lg flex-shrink-0">🏪</div>
           <div className="overflow-hidden">
             <p className="font-bold text-white text-sm truncate">{store.name}</p>
-            <p className="text-slate-500 text-[10px]">Powered by Donmac Hub</p>
+            <p className="text-slate-500 text-[10px]">Marketplace Network Partner</p>
           </div>
         </div>
 
-        {/* Balance pill */}
         <div className="mx-3 mt-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2 text-center">
           <p className="text-[10px] text-emerald-400 font-semibold uppercase tracking-wider">Wallet</p>
           <p className="text-lg font-black text-emerald-300">{formatCurrency(profile?.balance || 0)}</p>
         </div>
 
-        {/* Nav */}
         <nav className="flex-1 py-4 px-2 space-y-1 overflow-y-auto">
           {navItems.map(item => (
             <button key={item.id} onClick={() => { setPage(item.id); setSidebarOpen(false) }}
@@ -268,7 +269,6 @@ function StoreDashboard({ store, resellerId, whatsapp }) {
           ))}
         </nav>
 
-        {/* Sign out */}
         <div className="p-3 border-t border-white/10">
           <div className="px-3 py-2 rounded-xl bg-white/5 mb-2">
             <p className="text-xs text-white font-semibold truncate">{profile?.name}</p>
@@ -280,9 +280,8 @@ function StoreDashboard({ store, resellerId, whatsapp }) {
         </div>
       </aside>
 
-      {/* Main */}
+      {/* Main Content Area */}
       <div className="lg:ml-56 flex-1 flex flex-col min-h-screen">
-        {/* Topbar */}
         <header className="bg-white border-b border-gray-100 shadow-sm h-14 flex items-center justify-between px-4 sticky top-0 z-20">
           <div className="flex items-center gap-3">
             <button onClick={() => setSidebarOpen(p => !p)} className="lg:hidden p-2 hover:bg-gray-100 rounded-xl text-gray-600">☰</button>
@@ -299,14 +298,12 @@ function StoreDashboard({ store, resellerId, whatsapp }) {
           </div>
         </header>
 
-        {/* Page content */}
         <main className="flex-1 p-4 sm:p-6 overflow-auto">
           <div className="max-w-5xl mx-auto">
 
-            {/* ── HOME ── */}
+            {/* ── HOME PAGE ── */}
             {page === 'home' && (
               <div className="space-y-6 animate-fade-in">
-                {/* Hero */}
                 <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-indigo-900 to-slate-900 p-6 text-white">
                   <div className="absolute -right-10 -top-10 w-40 h-40 rounded-full bg-indigo-500/10" />
                   <div className="relative">
@@ -315,13 +312,12 @@ function StoreDashboard({ store, resellerId, whatsapp }) {
                     <p className="text-slate-400 text-sm mt-1">{store.name}</p>
                     <p className="font-mono text-indigo-200 mt-2">{now.toLocaleTimeString('en-GH', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</p>
                   </div>
-                  <div className="absolute right-6 top-6">
-                    <p className="text-slate-400 text-xs text-right">Wallet</p>
+                  <div className="absolute right-6 top-6 text-right">
+                    <p className="text-slate-400 text-xs">Wallet Balance</p>
                     <p className="text-3xl font-black">{formatCurrency(profile?.balance || 0)}</p>
                   </div>
                 </div>
 
-                {/* Quick Actions */}
                 <div className="grid grid-cols-3 gap-3">
                   {[
                     { icon: '💳', label: 'Top Up', color: 'from-emerald-50 to-teal-50 border-emerald-100', text: 'text-emerald-700', action: () => setShowTopup(true) },
@@ -336,7 +332,6 @@ function StoreDashboard({ store, resellerId, whatsapp }) {
                   ))}
                 </div>
 
-                {/* Packages */}
                 <div>
                   <h3 className="font-bold text-gray-900 text-lg mb-4">Available Packages</h3>
                   <div className="space-y-4">
@@ -350,7 +345,7 @@ function StoreDashboard({ store, resellerId, whatsapp }) {
               </div>
             )}
 
-            {/* ── ORDERS ── */}
+            {/* ── ORDERS PAGE ── */}
             {page === 'orders' && (
               <div className="space-y-5 animate-fade-in">
                 <div className="flex flex-wrap items-center justify-between gap-4">
@@ -377,7 +372,7 @@ function StoreDashboard({ store, resellerId, whatsapp }) {
               </div>
             )}
 
-            {/* ── TOP UPS ── */}
+            {/* ── TOP UPS PAGE ── */}
             {page === 'topups' && (
               <div className="space-y-5 animate-fade-in">
                 <div className="flex flex-wrap items-center justify-between gap-4">
@@ -406,7 +401,7 @@ function StoreDashboard({ store, resellerId, whatsapp }) {
               </div>
             )}
 
-            {/* ── TRANSACTIONS ── */}
+            {/* ── TRANSACTIONS PAGE ── */}
             {page === 'transactions' && (
               <div className="space-y-5 animate-fade-in">
                 <div className="flex flex-wrap items-center justify-between gap-4">
@@ -437,14 +432,14 @@ function StoreDashboard({ store, resellerId, whatsapp }) {
               </div>
             )}
 
-            {/* ── PROFILE ── */}
+            {/* ── PROFILE PAGE ── */}
             {page === 'profile' && (
               <div className="max-w-lg space-y-5 animate-fade-in">
                 <h2 className="text-xl font-bold text-gray-900">My Profile</h2>
                 <Card className="p-6">
                   <div className="flex items-center gap-4 mb-5">
                     <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-2xl font-bold shadow-lg">
-                      {profile?.name?.charAt(0)?.toUpperCase()}
+                      {profile?.name?.charAt(0)?.toUpperCase() || '?'}
                     </div>
                     <div>
                       <p className="font-bold text-gray-900 text-lg">{profile?.name}</p>
@@ -454,9 +449,9 @@ function StoreDashboard({ store, resellerId, whatsapp }) {
                   </div>
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     {[
-                      { label: 'Phone', value: profile?.phone },
+                      { label: 'Phone', value: profile?.phone || 'N/A' },
                       { label: 'Balance', value: formatCurrency(profile?.balance || 0) },
-                      { label: 'Store', value: store.name },
+                      { label: 'Store Name', value: store.name },
                       { label: 'Status', value: profile?.status || 'active' },
                     ].map(f => (
                       <div key={f.label} className="bg-gray-50 rounded-xl p-3">
@@ -488,7 +483,7 @@ function StoreDashboard({ store, resellerId, whatsapp }) {
                       try {
                         const { error } = await supabase.auth.updateUser({ password: pwForm.newPw })
                         if (error) throw error
-                        toast.success('Password changed!')
+                        toast.success('Password updated successfully!')
                         setPwForm({ current: '', newPw: '', confirm: '' })
                       } catch (e) { toast.error(e.message) }
                     }} className="w-full mt-1" variant="danger">Change Password</Btn>
@@ -501,7 +496,7 @@ function StoreDashboard({ store, resellerId, whatsapp }) {
         </main>
       </div>
 
-      {/* Modals */}
+      {/* ── MODALS & DRAWERS ── */}
       {buyState && <BuyModal {...buyState} onClose={() => setBuyState(null)} />}
       {cartOpen && <CartDrawer onOrderPlaced={loadData} />}
 
@@ -512,128 +507,67 @@ function StoreDashboard({ store, resellerId, whatsapp }) {
             <div className="rounded-xl p-4 bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100">
               <p className="font-bold text-blue-800 text-sm mb-3">Send MoMo Payment To:</p>
               <div className="space-y-2">
-                <div className="flex justify-between text-sm"><span className="text-gray-500">MoMo Name</span><span className="font-bold">Osei Michael</span></div>
-                <div className="flex justify-between text-sm"><span className="text-gray-500">MoMo Number</span><span className="font-bold">0549358359</span></div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Account Name</span>
+                  <span className="font-bold">{store.payment_name || 'Store Owner'}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">MoMo Number</span>
+                  <span className="font-bold">{store.payment_phone || 'Contact Support'}</span>
+                </div>
               </div>
             </div>
+            
             <div className="rounded-xl p-4 bg-amber-50 border border-amber-100">
-              <p className="font-semibold text-amber-800 text-sm mb-2">📋 Steps:</p>
+              <p className="font-semibold text-amber-800 text-sm mb-2">📋 Instructions:</p>
               <ol className="text-xs text-amber-700 space-y-1 list-decimal list-inside">
-                <li>Copy your Reference Code below</li>
-                <li>Send MoMo to <strong>0549358359</strong></li>
-                <li>Include the code in the transfer note/description</li>
-                <li>Wallet is credited automatically!</li>
+                <li>Copy your absolute reference code below.</li>
+                <li>Send money to the mobile money number above.</li>
+                <li>**Crucial**: Paste this code exactly into your payment/reference note.</li>
+                <li>Your balance credits automatically on confirmation!</li>
               </ol>
             </div>
+
             <div className="text-center">
-              <p className="text-xs text-gray-500 mb-2">Your Reference Code</p>
+              <p className="text-xs text-gray-500 mb-2">Your Personal Deposit Reference</p>
               <div className="inline-flex items-center gap-3 bg-indigo-50 border-2 border-dashed border-indigo-300 rounded-xl px-8 py-4">
-                <span className="font-mono text-3xl font-black text-indigo-700 tracking-[0.3em]">{myRef}</span>
+                <span className="font-mono text-3xl font-black text-indigo-700 tracking-[0.2em]">{myRef}</span>
               </div>
             </div>
-            <Btn onClick={() => { navigator.clipboard?.writeText(myRef); toast.success('Copied!') }} className="w-full">📋 Copy Reference Code</Btn>
-            <button onClick={() => { setShowTopup(false); setShowClaim(true) }} className="w-full text-xs text-gray-400 hover:text-indigo-600 transition">
-              Already paid without ref code? Claim with Transaction ID →
+            
+            <Btn onClick={() => { navigator.clipboard?.writeText(myRef); toast.success('Reference code copied!') }} className="w-full">📋 Copy Reference Code</Btn>
+            <button onClick={() => { setShowTopup(false); setShowClaim(true) }} className="w-full text-xs text-center text-gray-400 hover:text-indigo-600 transition block mt-2">
+              Paid without a reference code? Claim with Transaction ID →
             </button>
           </div>
         </Modal>
       )}
 
+      {/* Reference View Modal */}
       {showRef && (
         <Modal title="🔑 Reference Code" onClose={() => setShowRef(false)} size="sm">
           <div className="text-center space-y-4">
-            <p className="text-sm text-gray-500">Include this code when sending MoMo to auto-credit your wallet.</p>
+            <p className="text-sm text-gray-500">Use this unique identifier in your payment notes for automatic configuration.</p>
             <div className="py-6 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-2xl border-2 border-dashed border-indigo-300">
-              <p className="font-mono text-4xl font-black text-indigo-700 tracking-[0.4em]">{myRef}</p>
+              <p className="font-mono text-4xl font-black text-indigo-700 tracking-[0.2em]">{myRef}</p>
             </div>
             <Btn onClick={() => { navigator.clipboard?.writeText(myRef); toast.success('Copied!') }} className="w-full">📋 Copy Code</Btn>
           </div>
         </Modal>
       )}
 
+      {/* Manual Tx ID Verification Claim Modal */}
       {showClaim && (
         <Modal title="🧾 Claim with Transaction ID" onClose={() => setShowClaim(false)} size="sm">
           <div className="space-y-4">
             <div className="bg-blue-50 rounded-xl p-4 border border-blue-100 text-sm text-blue-700">
-              Paid MoMo but forgot to include your reference code? Enter the transaction ID from your receipt.
+              Forgot to attach your reference string? Input your official receipt Transaction ID below to verify your topup manually.
             </div>
-            <Input label="Transaction ID" value={claimTxId} onChange={e => setClaimTxId(e.target.value)} placeholder="e.g. GH123456789" icon="🔍" />
-            <Btn onClick={handleClaim} loading={claimLoading} className="w-full" size="lg">Claim Amount</Btn>
+            <Input label="Transaction ID" value={claimTxId} onChange={e => setClaimTxId(e.target.value)} placeholder="e.g. 10245678911" icon="🔍" />
+            <Btn onClick={handleClaim} loading={claimLoading} className="w-full" size="lg">Verify & Claim Wallet Balance</Btn>
           </div>
         </Modal>
       )}
-
-      {/* WhatsApp */}
-      <a href={`https://wa.me/${waNumber}`} target="_blank" rel="noopener noreferrer"
-        className="fixed bottom-6 left-5 z-40 w-14 h-14 bg-green-500 hover:bg-green-600 rounded-full flex items-center justify-center shadow-xl shadow-green-500/40 transition-all hover:scale-110">
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-      </a>
     </div>
-  )
-}
-
-// ─── Main StoreFront Component ──────────────────────────────────
-export default function StoreFront() {
-  const { slug } = useParams()
-  const { user, profile, setStorefront } = useAuthStore()
-  const [store, setStore] = useState(null)
-  const [notFound, setNotFound] = useState(false)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => { loadStore() }, [slug])
-
-  async function loadStore() {
-    setLoading(true)
-    try {
-      const storeData = await getStoreBySlug(slug)
-      if (!storeData) { setNotFound(true); return }
-      setStore(storeData)
-      setStorefront({ storeId: storeData.id, resellerId: storeData.reseller_id })
-    } catch {
-      setNotFound(true)
-    } finally { setLoading(false) }
-  }
-
-  if (loading) return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 to-indigo-900">
-      <div className="text-center text-white">
-        <div className="w-12 h-12 border-2 border-indigo-300 border-t-white rounded-full animate-spin mx-auto mb-4" />
-        <p className="text-slate-400 text-sm">Loading store…</p>
-      </div>
-    </div>
-  )
-
-  if (notFound || !store) return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 to-indigo-900">
-      <div className="text-center text-white p-8">
-        <p className="text-6xl mb-4">🔍</p>
-        <h1 className="text-2xl font-bold">Store not found</h1>
-        <p className="text-slate-400 mt-2 text-sm">The store <code className="bg-white/10 px-2 py-0.5 rounded font-mono">/store/{slug}</code> doesn't exist or is unavailable.</p>
-      </div>
-    </div>
-  )
-
-  if (store.reseller?.status === 'blocked') return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 to-indigo-900">
-      <div className="text-center text-white p-8">
-        <p className="text-6xl mb-4">🚫</p>
-        <h1 className="text-2xl font-bold">Store unavailable</h1>
-        <p className="text-slate-400 mt-2 text-sm">This store is currently unavailable.</p>
-      </div>
-    </div>
-  )
-
-  // Not logged in — show auth screen
-  if (!user || !profile) {
-    return <StoreAuthScreen store={store} onAuth={() => {}} />
-  }
-
-  // Logged in — show full dashboard
-  return (
-    <StoreDashboard
-      store={store}
-      resellerId={store.reseller_id}
-      whatsapp={store.whatsapp || '0549358359'}
-    />
   )
 }
