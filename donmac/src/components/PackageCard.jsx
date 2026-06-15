@@ -2,6 +2,25 @@ import { useState } from 'react'
 import { formatCurrency, cls } from '../lib/utils'
 import { Btn } from './ui'
 
+// Define the branding assets mapped to your group.networkKey
+const NETWORK_BRANDING = {
+  mtn: {
+    logo: 'https://images.unsplash.com/photo-1650346387034-2e9b0429f6db?auto=format&fit=crop&w=80&q=80', // Replace with your local asset path (e.g., /images/mtn-logo.png)
+    fallbackChar: 'M',
+    brandColor: '#B38F00'
+  },
+  telecel: {
+    logo: 'https://images.unsplash.com/photo-1650346387034-2e9b0429f6db?auto=format&fit=crop&w=80&q=80', // Replace with your local asset path
+    fallbackChar: 'T',
+    brandColor: '#C01020'
+  },
+  airtel: {
+    logo: 'https://images.unsplash.com/photo-1650346387034-2e9b0429f6db?auto=format&fit=crop&w=80&q=80', // Replace with your local asset path
+    fallbackChar: 'A',
+    brandColor: '#1d4ed8'
+  }
+}
+
 export default function PackageCard({ groupKey, group, pkgConfig, resellerPrices, onBuy }) {
   const [expanded, setExpanded] = useState(false)
 
@@ -15,7 +34,8 @@ export default function PackageCard({ groupKey, group, pkgConfig, resellerPrices
     return item.price
   }
 
-  const networkIcon = { mtn: '🟡', telecel: '🔴', airtel: '🔵' }[group.networkKey] || '⚪'
+  // Get current brand config with an explicit fallback object
+  const brand = NETWORK_BRANDING[group.networkKey] || { fallbackChar: '⚪', brandColor: '#6b7280' }
 
   return (
     <div className="rounded-2xl overflow-hidden border border-gray-100 shadow-sm hover:shadow-md transition-all duration-300">
@@ -25,9 +45,19 @@ export default function PackageCard({ groupKey, group, pkgConfig, resellerPrices
         className="w-full flex items-center justify-between p-5 text-left hover:opacity-95 transition"
         style={{ background: `linear-gradient(135deg, ${group.gradientFrom}15, ${group.gradientTo}08)` }}>
         <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-xl flex items-center justify-center text-2xl shadow-sm"
-            style={{ background: `linear-gradient(135deg, ${group.gradientFrom}, ${group.gradientTo})` }}>
-            {networkIcon}
+          {/* Enhanced Badge Container */}
+          <div className="w-12 h-12 rounded-xl flex items-center justify-center shadow-sm overflow-hidden p-1 bg-white border border-gray-100">
+            {brand.logo ? (
+              <img 
+                src={brand.logo} 
+                alt={`${group.networkKey} logo`} 
+                className="w-full h-full object-contain"
+              />
+            ) : (
+              <span className="font-black text-xl" style={{ color: brand.brandColor }}>
+                {brand.fallbackChar}
+              </span>
+            )}
           </div>
           <div>
             <div className="flex items-center gap-2">
@@ -78,7 +108,7 @@ export default function PackageCard({ groupKey, group, pkgConfig, resellerPrices
                     </div>
                     <p className="font-bold text-gray-900 text-base">{item.data}</p>
                     <p className="text-xs text-gray-500 mt-0.5 mb-2">{group.validity}</p>
-                    <p className="font-extrabold text-lg" style={{ color: group.networkKey === 'mtn' ? '#B38F00' : group.networkKey === 'telecel' ? '#C01020' : '#1d4ed8' }}>
+                    <p className="font-extrabold text-lg" style={{ color: brand.brandColor }}>
                       {formatCurrency(price)}
                     </p>
                     {itemOnline && (
