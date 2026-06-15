@@ -1,157 +1,106 @@
 import { createClient } from '@supabase/supabase-js'
 
-// Initialize Supabase Admin client with service role key
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false
-    }
-  }
+const supabase = createClient(
+  process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
 )
 
 export default async function handler(req, res) {
-  // Ensure we only handle POST requests
+  // Log the request
+  console.log('Update user endpoint called:', {
+    method: req.method,
+    headers: req.headers,
+    body: req.body
+  })
+  
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end()
+  }
+  
   if (req.method !== 'POST') {
+    console.log('Method not allowed:', req.method)
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
   try {
-    // 1. Grab the auth header from incoming request
-    const authHeader = req.headers.authorization
-    if (!authHeader) throw new Error('Missing Authorization header')
-
-    // 2. Safely split out "Bearer " to extract the true raw JWT
-    const jwt = authHeader.startsWith('Bearer ') 
-      ? authHeader.substring(7, authHeader.length) 
-      : authHeader
-
-    // 3. Authenticate against Supabase
-    const adminUser = await verifyAdmin(jwt)
+    const { action, userId } = req.body
+    const adminToken = (req.headers.authorization || '').replace('Bearer ', '').trim()
     
-    // 4. Extract parameters from your request body
-    const { action, userId, amount } = req.body
+    console.log('Processing:', { action, userId, adminToken: adminToken.substring(0, 20) + '...' })
     
-    // Validate required fields
-    if (!userId || !action) {
-      return res.status(400).json({ error: 'Missing mandatory fields: userId or action' })
+    // Verify admin
+    const { data: admin, error: adminError } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('api_token', adminToken)
+      .single()
+    
+    console.log('Admin check result:', { admin, adminError })
+    
+    if (adminError || !admin || admin.role !== 'admin') {
+      console.log('Admin verification failed')
+      return res.status(403).json({ error: 'Admin access required' })
     }
-
-    // Validate amount for financial actions
-    if ((action === 'credit' || action === 'debit') && (!amount || isNaN(Number(amount)) || Number(amount) <= 0)) {
-      return res.status(400).json({ error: 'Valid amount is required for credit/debit operations' })
-    }
-
-    // 5. Handle different actions
+    
     if (action === 'block' || action === 'unblock') {
-      const targetStatus = action === 'block' ? 'blocked' : 'active'
-      const { error: statusError } = await supabaseAdmin
+      const newStatus = action === 'block' ? 'blocked' : 'active'
+      console.log(`Updating user ${userId} status to ${newStatus}`)
+      
+      const { data, error: updateError } = await supabase
         .from('profiles')
-        .update({ status: targetStatus, updated_at: new Date().toISOString() })
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
         .eq('id', userId)
-
-      if (statusError) throw statusError
-      return res.status(200).json({ message: `User status changed to ${targetStatus} successfully` })
-    } 
+        .select()
+      
+      console.log('Update result:', { data, updateError })
+      
+      if (updateError) throw updateError
+      
+      return res.status(200).json({ 
+        success: true, 
+        message: `User ${action}ed successfully`,
+        status: newStatus,
+        user: data
+      })
+    }
     
     if (action === 'delete') {
-      // Delete user from auth and profiles
-      const { error: deleteAuthError } = await supabaseAdmin.auth.admin.deleteUser(userId)
-      if (deleteAuthError) throw deleteAuthError
+      console.log(`Deleting user ${userId}`)
       
-      // Also delete from profiles if not automatically deleted by trigger
-      const { error: deleteProfileError } = await supabaseAdmin
+      // First delete from profiles
+      const { error: profileDeleteError } = await supabase
         .from('profiles')
         .delete()
         .eq('id', userId)
       
-      if (deleteProfileError) console.warn('Profile deletion warning:', deleteProfileError)
-      
-      return res.status(200).json({ message: 'User deleted successfully' })
-    }
-    
-    if (action === 'credit' || action === 'debit') {
-      // Use transaction for balance updates to prevent race conditions
-      const numericAmount = Number(amount)
-      let newBalance
-      let operationError
-      
-      // For debit, check if sufficient funds exist first
-      if (action === 'debit') {
-        const { data: profile, error: fetchError } = await supabaseAdmin
-          .from('profiles')
-          .select('balance')
-          .eq('id', userId)
-          .single()
-          
-        if (fetchError || !profile) {
-          return res.status(404).json({ error: 'Target user profile not found' })
-        }
-        
-        if (Number(profile.balance) < numericAmount) {
-          return res.status(400).json({ error: 'Insufficient balance for debit operation' })
-        }
+      if (profileDeleteError) {
+        console.log('Profile delete error:', profileDeleteError)
       }
       
-      // Perform the update with atomic operation
-      if (action === 'credit') {
-        const { data, error } = await supabaseAdmin.rpc('credit_user_balance', {
-          user_id: userId,
-          credit_amount: numericAmount
-        })
-        operationError = error
-        if (!error) newBalance = data
-      } else {
-        const { data, error } = await supabaseAdmin.rpc('debit_user_balance', {
-          user_id: userId,
-          debit_amount: numericAmount
-        })
-        operationError = error
-        if (!error) newBalance = data
+      // Then delete from auth
+      const { error: authDeleteError } = await supabase.auth.admin.deleteUser(userId)
+      
+      if (authDeleteError) {
+        console.log('Auth delete error:', authDeleteError)
+        throw authDeleteError
       }
-      
-      if (operationError) throw operationError
-      
-      // Get final balance for response
-      const { data: finalProfile } = await supabaseAdmin
-        .from('profiles')
-        .select('balance')
-        .eq('id', userId)
-        .single()
       
       return res.status(200).json({ 
-        message: `Wallet ${action}ed successfully`, 
-        newBalance: finalProfile?.balance || newBalance
+        success: true, 
+        message: 'User deleted successfully' 
       })
     }
     
-    return res.status(400).json({ error: 'Invalid action provided' })
-
-  } catch (err) {
-    console.error('⚠️ Admin endpoint execution error:', err.message)
-    return res.status(401).json({ error: err.message || 'Unauthorized transaction context' })
+    return res.status(400).json({ error: 'Invalid action' })
+    
+  } catch (error) {
+    console.error('Detailed error in update-user:', error)
+    return res.status(500).json({ 
+      error: error.message,
+      details: error.toString(),
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    })
   }
-}
-
-async function verifyAdmin(cleanJwt) {
-  if (!cleanJwt) throw new Error('Missing authentication token string')
-  
-  const { data, error } = await supabaseAdmin.auth.getUser(cleanJwt)
-  if (error || !data?.user) {
-    throw new Error('Invalid session validation')
-  }
-
-  const { data: p, error: profileError } = await supabaseAdmin
-    .from('profiles')
-    .select('role')
-    .eq('id', data.user.id)
-    .single()
-
-  if (profileError || p?.role !== 'admin') {
-    throw new Error('Admin access tier required')
-  }
-
-  return data.user
 }
