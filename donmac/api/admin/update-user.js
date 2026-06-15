@@ -1,3 +1,17 @@
+import { createClient } from '@supabase/supabase-js'
+
+// Initialize Supabase Admin client with service role key
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  }
+)
+
 export default async function handler(req, res) {
   // Ensure we only handle POST requests
   if (req.method !== 'POST') {
