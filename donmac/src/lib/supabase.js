@@ -1,8 +1,14 @@
 import { createClient } from '@supabase/supabase-js'
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://placeholder.supabase.co'
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'placeholder-key'
+// 1. Grab raw environment values safely
+const rawUrl = import.meta.env.VITE_SUPABASE_URL || 'https://placeholder.supabase.co'
+const rawKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'placeholder-key'
 
+// 2. Clean out trailing spaces and hidden line breaks (\n, \r, %0A)
+const SUPABASE_URL = rawUrl.trim()
+const SUPABASE_ANON_KEY = rawKey.trim().replace(/[\n\r]/g, '')
+
+// 3. Initialize with the perfectly sanitized values
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { persistSession: true, autoRefreshToken: true },
 })
