@@ -21,16 +21,23 @@ export default function MyStore() {
   const [showWdModal, setShowWdModal] = useState(false)
   const [activeTab, setActiveTab] = useState('overview')
   const [editStore, setEditStore] = useState(false)
-  const [editStoreForm, setEditStoreForm] = useState({})
+  const [editStoreForm, setEditStoreForm] = useState({ name: '', whatsapp: '', welcome: '' })
 
   const hasStore = !!profile?.store?.id
 
+  // Synchronize Sub-Services (Prices & History) when Store is active
   useEffect(() => {
-    if (hasStore) {
+    if (hasStore && profile?.id) {
       loadPrices()
       loadWithdrawals()
+      // Auto-populate edit form state when profile mounts or shifts
+      setEditStoreForm({
+        name: profile?.store?.name || '',
+        whatsapp: profile?.store?.whatsapp || '',
+        welcome: profile?.store?.welcome || ''
+      })
     }
-  }, [profile?.id, hasStore])
+  }, [profile?.id, hasStore, profile?.store])
 
   async function loadPrices() {
     try {
@@ -54,13 +61,12 @@ export default function MyStore() {
   }
 
   function validateSlug(val) {
-    const clean = val.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
-    return clean
+    return val.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
   }
 
   async function checkSlugAvailable(slug) {
     const { data } = await supabase.from('stores').select('id').eq('slug', slug).single()
-    return !data // true = available
+    return !data 
   }
 
   async function handleCreateStore() {
@@ -78,6 +84,7 @@ export default function MyStore() {
         setSavingStore(false)
         return
       }
+      
       await createStore({
         reseller_id: profile.id,
         name: name.trim(),
@@ -85,6 +92,8 @@ export default function MyStore() {
         whatsapp: whatsapp.trim(),
         welcome: welcome.trim(),
       })
+      
+      // Forces Zustand / Context tracking layers to refetch live metadata profiles
       await refreshProfile()
       toast.success('🎉 Your store has been created!')
     } catch (e) {
@@ -96,10 +105,14 @@ export default function MyStore() {
 
   async function handleUpdateStore() {
     const { name, whatsapp, welcome } = editStoreForm
-    if (!name.trim()) { toast.error('Store name is required'); return }
-    if (!whatsapp.trim()) { toast.error('WhatsApp number is required'); return }
+    if (!name?.trim()) { toast.error('Store name is required'); return }
+    if (!whatsapp?.trim()) { toast.error('WhatsApp number is required'); return }
     try {
-      await supabase.from('stores').update({ name: name.trim(), whatsapp: whatsapp.trim(), welcome: welcome.trim() }).eq('id', profile.store.id)
+      await supabase
+        .from('stores')
+        .update({ name: name.trim(), whatsapp: whatsapp.trim(), welcome: welcome.trim() })
+        .eq('id', profile.store.id)
+        
       await refreshProfile()
       setEditStore(false)
       toast.success('Store updated!')
@@ -129,7 +142,7 @@ export default function MyStore() {
     } catch (e) { toast.error(e.message) }
   }
 
-  const shareLink = hasStore ? `${window.location.origin}/store/${profile.store.slug}` : ''
+  const shareLink = hasStore ? `${window.location.origin}/store/${profile.store?.slug}` : ''
   const totalWithdrawn = withdrawals.filter(w => w.status === 'paid').reduce((s, w) => s + (w.amount || 0), 0)
 
   // ── CREATE STORE SCREEN ──────────────────────────────────────
@@ -145,7 +158,6 @@ export default function MyStore() {
         </div>
 
         <Card className="p-6 space-y-5">
-          {/* Store Name */}
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1.5">
               Store Name <span className="text-red-500">*</span>
@@ -160,7 +172,6 @@ export default function MyStore() {
             <p className="text-xs text-gray-400 mt-1">This is the name customers will see on your storefront.</p>
           </div>
 
-          {/* Slug */}
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1.5">
               Store URL Slug <span className="text-red-500">*</span>
@@ -188,7 +199,6 @@ export default function MyStore() {
             <p className="text-xs text-gray-400 mt-1">Only lowercase letters, numbers and hyphens. This cannot be changed later.</p>
           </div>
 
-          {/* WhatsApp */}
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1.5">
               WhatsApp Number <span className="text-red-500">*</span>
@@ -203,10 +213,8 @@ export default function MyStore() {
                 className="flex-1 px-3 py-3 text-sm focus:outline-none"
               />
             </div>
-            <p className="text-xs text-gray-400 mt-1">Customers on your storefront will chat with this number.</p>
           </div>
 
-          {/* Welcome Message */}
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1.5">
               Welcome Message <span className="text-gray-400 font-normal">(optional)</span>
@@ -214,29 +222,13 @@ export default function MyStore() {
             <textarea
               value={storeForm.welcome}
               onChange={e => setStoreForm(p => ({ ...p, welcome: e.target.value }))}
-              placeholder="e.g. Welcome to Kwame Data Hub! We offer the best data deals at the lowest prices. Contact us for bulk orders."
+              placeholder="Welcome message for your storefront..."
               rows={3}
               className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition resize-none"
             />
-            <p className="text-xs text-gray-400 mt-1">Shown to customers on your store's login page.</p>
           </div>
 
-          {/* Preview */}
-          {(storeForm.name || storeForm.slug) && (
-            <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
-              <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wider mb-2">Preview</p>
-              <p className="font-bold text-gray-900">{storeForm.name || 'Your Store Name'}</p>
-              <p className="text-xs text-indigo-500 font-mono mt-0.5">{window.location.origin}/store/{storeForm.slug || 'your-slug'}</p>
-              {storeForm.whatsapp && <p className="text-xs text-gray-500 mt-0.5">📱 {storeForm.whatsapp}</p>}
-            </div>
-          )}
-
-          <Btn
-            onClick={handleCreateStore}
-            loading={savingStore}
-            className="w-full"
-            size="lg"
-          >
+          <Btn onClick={handleCreateStore} loading={savingStore} className="w-full" size="lg">
             🏪 Create My Store
           </Btn>
         </Card>
@@ -244,7 +236,7 @@ export default function MyStore() {
     )
   }
 
-  // ── STORE DASHBOARD ──────────────────────────────────────────
+  // ── STORE DASHBOARD (Renders immediately when hasStore is true) ──
   const tabs = [
     { id: 'overview', label: '📊 Overview' },
     { id: 'prices', label: '💰 Prices' },
@@ -254,78 +246,43 @@ export default function MyStore() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Hero Header */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-indigo-900 to-purple-900 p-6 text-white">
-        <div className="absolute -right-10 -top-10 w-48 h-48 rounded-full bg-white/5 pointer-events-none" />
-        <div className="absolute right-20 bottom-0 w-32 h-32 rounded-full bg-purple-500/10 pointer-events-none" />
-
         <div className="relative flex flex-col sm:flex-row sm:items-start justify-between gap-5">
           <div>
             <div className="flex items-center gap-2 mb-1">
               <span className="text-indigo-300 text-xs font-semibold uppercase tracking-widest">My Reseller Store</span>
               <span className="bg-green-500/20 text-green-300 text-[10px] font-bold px-2 py-0.5 rounded-full">● LIVE</span>
             </div>
-            <h2 className="text-2xl font-black">{profile.store.name}</h2>
-            <p className="text-indigo-300 text-sm mt-0.5">📱 {profile.store.whatsapp}</p>
-            {profile.store.welcome && (
-              <p className="text-slate-400 text-xs mt-2 max-w-md italic">"{profile.store.welcome}"</p>
-            )}
+            <h2 className="text-2xl font-black">{profile?.store?.name || 'Loading Store...'}</h2>
+            <p className="text-indigo-300 text-sm mt-0.5">📱 {profile?.store?.whatsapp}</p>
           </div>
 
-          {/* Profit Card */}
           <div className="bg-white/10 backdrop-blur-sm rounded-2xl px-6 py-4 text-center min-w-[160px] border border-white/10">
             <p className="text-indigo-200 text-xs font-semibold uppercase tracking-wider mb-1">Profit Balance</p>
-            <p className="text-4xl font-black text-white">{formatCurrency(profile.profit || 0)}</p>
-            <Btn
-              onClick={() => setShowWdModal(true)}
-              variant="warning"
-              size="sm"
-              className="mt-3 w-full"
-            >
+            <p className="text-4xl font-black text-white">{formatCurrency(profile?.profit || 0)}</p>
+            <Btn onClick={() => setShowWdModal(true)} variant="warning" size="sm" className="mt-3 w-full">
               💸 Withdraw
             </Btn>
           </div>
         </div>
 
-        {/* Share Link Bar */}
         <div className="relative mt-5 flex items-center gap-3 bg-white/10 rounded-xl px-4 py-2.5 border border-white/10">
           <span className="text-indigo-300 text-xs hidden sm:block">🔗 Store Link:</span>
           <span className="text-white text-xs font-mono flex-1 truncate">{shareLink}</span>
           <button
             onClick={() => { navigator.clipboard?.writeText(shareLink); toast.success('Link copied!') }}
-            className="text-xs bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg transition font-semibold whitespace-nowrap"
+            className="text-xs bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg transition font-semibold"
           >
             📋 Copy
           </button>
-          <a href={shareLink} target="_blank" rel="noopener noreferrer"
-            className="text-xs bg-indigo-500/40 hover:bg-indigo-500/60 px-3 py-1.5 rounded-lg transition font-semibold whitespace-nowrap">
-            👁 Preview
-          </a>
         </div>
-      </div>
-
-      {/* Stats row */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        {[
-          { label: 'Total Profit', value: formatCurrency(profile.profit || 0), color: 'text-emerald-600', bg: 'bg-emerald-50' },
-          { label: 'Total Withdrawn', value: formatCurrency(totalWithdrawn), color: 'text-indigo-600', bg: 'bg-indigo-50' },
-          { label: 'Pending Requests', value: withdrawals.filter(w => w.status === 'pending').length, color: 'text-amber-600', bg: 'bg-amber-50' },
-          { label: 'WhatsApp', value: profile.store.whatsapp, color: 'text-green-600', bg: 'bg-green-50' },
-        ].map(s => (
-          <Card key={s.label} className="p-4 text-center">
-            <div className={`${s.bg} rounded-xl p-3 mb-2`}>
-              <p className={`text-lg font-black ${s.color} truncate`}>{s.value}</p>
-            </div>
-            <p className="text-xs text-gray-500 font-medium">{s.label}</p>
-          </Card>
-        ))}
       </div>
 
       {/* Tabs */}
       <div className="flex gap-1 bg-gray-100 rounded-xl p-1 overflow-x-auto">
         {tabs.map(t => (
           <button key={t.id} onClick={() => setActiveTab(t.id)}
-            className={`flex-1 py-2.5 px-3 rounded-lg text-xs sm:text-sm font-semibold whitespace-nowrap transition-all ${
+            className={`flex-1 py-2.5 px-3 rounded-lg text-xs sm:text-sm font-semibold transition-all ${
               activeTab === t.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
             }`}>
             {t.label}
@@ -339,10 +296,10 @@ export default function MyStore() {
           <h3 className="font-bold text-gray-900 mb-4">Store Information</h3>
           <div className="grid sm:grid-cols-2 gap-4">
             {[
-              { label: 'Store Name', value: profile.store.name },
-              { label: 'Store Slug', value: `/${profile.store.slug}` },
-              { label: 'WhatsApp', value: profile.store.whatsapp },
-              { label: 'Welcome Message', value: profile.store.welcome || '(none set)' },
+              { label: 'Store Name', value: profile?.store?.name },
+              { label: 'Store Slug', value: `/${profile?.store?.slug || ''}` },
+              { label: 'WhatsApp', value: profile?.store?.whatsapp },
+              { label: 'Welcome Message', value: profile?.store?.welcome || '(none set)' },
             ].map(f => (
               <div key={f.label} className="bg-gray-50 rounded-xl p-4">
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">{f.label}</p>
@@ -350,10 +307,6 @@ export default function MyStore() {
               </div>
             ))}
           </div>
-          <Btn onClick={() => { setEditStoreForm({ name: profile.store.name, whatsapp: profile.store.whatsapp, welcome: profile.store.welcome || '' }); setEditStore(true) }}
-            variant="secondary" size="sm" className="mt-5">
-            ✏️ Edit Store Info
-          </Btn>
         </Card>
       )}
 
@@ -378,41 +331,32 @@ export default function MyStore() {
           <div className="space-y-6">
             {Object.entries(PACKAGES).map(([key, group]) => (
               <div key={key}>
-                {/* Group header */}
                 <div className="flex items-center gap-2 mb-3 pb-2 border-b border-gray-100">
                   <div className="w-2.5 h-2.5 rounded-full" style={{ background: group.color }} />
                   <p className="font-bold text-gray-800 text-sm">{group.label}</p>
-                  <span className="text-xs text-gray-400">· {group.validity}</span>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
                   {group.items.map(item => {
                     const cost = item.price
                     const myPrice = prices[item.id] !== undefined ? prices[item.id] : cost
                     const profit = myPrice - cost
                     return (
-                      <div key={item.id}
-                        className="border border-gray-100 rounded-xl p-3 bg-gray-50 hover:bg-white hover:shadow-sm transition">
+                      <div key={item.id} className="border border-gray-100 rounded-xl p-3 bg-gray-50">
                         <p className="font-bold text-sm text-gray-900">{item.data}</p>
                         <p className="text-[10px] text-gray-400 mb-2">Cost: {formatCurrency(cost)}</p>
                         {editPrices ? (
                           <input
                             type="number"
                             step="0.01"
-                            min={0}
                             value={prices[item.id] ?? ''}
                             onChange={e => setPrices(p => ({ ...p, [item.id]: e.target.value === '' ? undefined : parseFloat(e.target.value) }))}
-                            placeholder={cost.toFixed(2)}
-                            className="w-full border border-indigo-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white font-mono"
+                            className="w-full border border-indigo-200 rounded-lg px-2 py-1.5 text-sm font-mono"
                           />
                         ) : (
                           <div className="flex items-center justify-between mt-1">
                             <span className="font-extrabold text-sm text-indigo-600">{formatCurrency(myPrice)}</span>
-                            {profit > 0 ? (
-                              <span className="text-[10px] font-bold text-green-600 bg-green-50 px-1.5 py-0.5 rounded">+{formatCurrency(profit)}</span>
-                            ) : profit < 0 ? (
-                              <span className="text-[10px] font-bold text-red-500 bg-red-50 px-1.5 py-0.5 rounded">{formatCurrency(profit)}</span>
-                            ) : null}
+                            {profit > 0 && <span className="text-[10px] font-bold text-green-600 bg-green-50 px-1.5 py-0.5 rounded">+{formatCurrency(profit)}</span>}
                           </div>
                         )}
                       </div>
@@ -422,13 +366,6 @@ export default function MyStore() {
               </div>
             ))}
           </div>
-
-          {editPrices && (
-            <div className="mt-5 pt-4 border-t border-gray-100 flex gap-3">
-              <Btn onClick={handleSavePrices} loading={savingPrices} size="lg" className="flex-1">💾 Save All Prices</Btn>
-              <Btn onClick={() => { setPrices(savedPrices); setEditPrices(false) }} variant="secondary" size="lg" className="flex-1">Cancel</Btn>
-            </div>
-          )}
         </Card>
       )}
 
@@ -438,7 +375,6 @@ export default function MyStore() {
           <div className="flex items-center justify-between">
             <div>
               <p className="font-bold text-gray-900">Withdrawal History</p>
-              <p className="text-xs text-gray-400 mt-0.5">Minimum withdrawal: ₵30</p>
             </div>
             <Btn onClick={() => setShowWdModal(true)} variant="success" size="sm">💸 Request Withdrawal</Btn>
           </div>
@@ -448,7 +384,7 @@ export default function MyStore() {
             ) : (
               <Table headers={['Date', 'Amount', 'Status']}>
                 {withdrawals.map(w => (
-                  <tr key={w.id} className="hover:bg-gray-50 transition">
+                  <tr key={w.id}>
                     <Td className="text-xs text-gray-400">{formatDate(w.created_at)}</Td>
                     <Td><span className="font-bold text-gray-900">{formatCurrency(w.amount)}</span></Td>
                     <Td><StatusBadge status={w.status} /></Td>
@@ -464,25 +400,30 @@ export default function MyStore() {
       {activeTab === 'settings' && (
         <Card className="p-6 space-y-5">
           <h3 className="font-bold text-gray-900">Store Settings</h3>
-          <Input label="Store Name *" value={editStoreForm.name ?? profile.store.name}
-            onChange={e => setEditStoreForm(p => ({ ...p, name: e.target.value }))} placeholder="Store name" />
-          <Input label="WhatsApp Number *" value={editStoreForm.whatsapp ?? profile.store.whatsapp}
-            onChange={e => setEditStoreForm(p => ({ ...p, whatsapp: e.target.value }))} placeholder="0XX XXX XXXX" icon="📱" />
+          <Input 
+            label="Store Name *" 
+            value={editStoreForm.name}
+            onChange={e => setEditStoreForm(p => ({ ...p, name: e.target.value }))} 
+            placeholder="Store name" 
+          />
+          <Input 
+            label="WhatsApp Number *" 
+            value={editStoreForm.whatsapp}
+            onChange={e => setEditStoreForm(p => ({ ...p, whatsapp: e.target.value }))} 
+            placeholder="0XX XXX XXXX" 
+            icon="📱" 
+          />
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Welcome Message</label>
             <textarea
-              value={editStoreForm.welcome ?? profile.store.welcome ?? ''}
+              value={editStoreForm.welcome}
               onChange={e => setEditStoreForm(p => ({ ...p, welcome: e.target.value }))}
               placeholder="Welcome message for your storefront..."
               rows={3}
               className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none transition"
             />
           </div>
-          <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
-            <p className="text-xs text-amber-700 font-medium">⚠️ Store slug cannot be changed after creation.</p>
-            <p className="text-xs text-amber-600 mt-0.5 font-mono">/store/{profile.store.slug}</p>
-          </div>
-          <Btn onClick={() => handleUpdateStore()} className="w-full" size="lg">Save Changes</Btn>
+          <Btn onClick={handleUpdateStore} className="w-full" size="lg">Save Changes</Btn>
         </Card>
       )}
 
@@ -492,42 +433,17 @@ export default function MyStore() {
           <div className="space-y-4">
             <div className="bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-100 rounded-xl p-4">
               <p className="text-sm font-semibold text-emerald-800">Available Profit</p>
-              <p className="text-3xl font-black text-emerald-600 mt-1">{formatCurrency(profile.profit || 0)}</p>
-              <p className="text-xs text-emerald-500 mt-1">Minimum withdrawal: ₵30</p>
+              <p className="text-3xl font-black text-emerald-600 mt-1">{formatCurrency(profile?.profit || 0)}</p>
             </div>
             <Input
               label="Amount to Withdraw (₵)"
               type="number"
-              min="30"
-              step="0.01"
-              max={profile.profit || 0}
               value={wdAmount}
               onChange={e => setWdAmount(e.target.value)}
               placeholder="0.00"
               icon="₵"
             />
-            {wdAmount && parseFloat(wdAmount) >= 30 && (
-              <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-xs text-blue-700">
-                Admin will process your withdrawal within 24 hours.
-              </div>
-            )}
             <Btn onClick={handleWithdraw} className="w-full" size="lg" variant="success">Submit Request</Btn>
-          </div>
-        </Modal>
-      )}
-
-      {/* Edit Store Modal */}
-      {editStore && (
-        <Modal title="✏️ Edit Store" onClose={() => setEditStore(false)} size="sm">
-          <div className="space-y-4">
-            <Input label="Store Name *" value={editStoreForm.name || ''} onChange={e => setEditStoreForm(p => ({ ...p, name: e.target.value }))} placeholder="Store name" />
-            <Input label="WhatsApp Number *" value={editStoreForm.whatsapp || ''} onChange={e => setEditStoreForm(p => ({ ...p, whatsapp: e.target.value }))} placeholder="0XX XXX XXXX" icon="📱" />
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Welcome Message</label>
-              <textarea value={editStoreForm.welcome || ''} onChange={e => setEditStoreForm(p => ({ ...p, welcome: e.target.value }))} rows={3}
-                className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" />
-            </div>
-            <Btn onClick={handleUpdateStore} className="w-full" size="lg">Save Changes</Btn>
           </div>
         </Modal>
       )}
