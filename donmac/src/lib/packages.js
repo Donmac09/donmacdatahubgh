@@ -90,7 +90,7 @@ export const PACKAGES = {
       { id: 'tel3', data: '5GB', price: 21.20 },
       { id: 'tel4', data: '10GB', price: 40 },
       { id: 'tel5', data: '15GB', price: 59 },
-      { id: 'tel6', textData: '20GB', price: 79 },
+      { id: 'tel6', data: '20GB', price: 79 },
       { id: 'tel7', data: '25GB', price: 97 },
       { id: 'tel8', data: '30GB', price: 116 },
       { id: 'tel9', data: '40GB', price: 154 },
@@ -175,28 +175,46 @@ export function getPriceForUser(itemId, resellerPrices) {
   return resellerPrices[itemId];
 }
 
+// ============================================================
+// GHData API Configuration
+// ============================================================
+
 export const GHDATA_TOKEN = '144|Upj7FsClobi8bIWLBWozmXOTRUzSDK2DCx0u2vuD3f64701d';
 export const GHDATA_BASE = 'https://ghdataconnect.com/api';
 
+/**
+ * Place a regular data bundle order (MTN, Telecel, AirtelTigo)
+ * Endpoint: POST /v1/purchaseBundle
+ */
 export async function placeGHDataOrder({ network, phone, dataAmount, token = GHDATA_TOKEN }) {
   const response = await fetch(`${GHDATA_BASE}/v1/purchaseBundle`, {
     method: 'POST',
-    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', 'Accept': 'application/json' },
-    body: JSON.stringify({ network, phone, amount: dataAmount, bypass: false, 'sim-type': 'Noraml SIM' })
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    },
+    body: JSON.stringify({
+      network: network,
+      phone: phone,
+      amount: dataAmount,
+      bypass: false
+    })
   });
-  const data = await response.json();
-  return data;
-}
-if (!response.ok) {
+
+  if (!response.ok) {
     const errorText = await response.text();
     throw new Error(`GHData API error: ${response.status} - ${errorText}`);
   }
-  
+
   const data = await response.json();
   return data;
 }
 
-// For iShare bundles (MTN Mashup)
+/**
+ * Place an iShare bundle order (MTN Mashup)
+ * Endpoint: POST /v1/createIshareBundleOrder
+ */
 export async function placeIshareOrder({ network, phone, dataAmount, token = GHDATA_TOKEN }) {
   const response = await fetch(`${GHDATA_BASE}/v1/createIshareBundleOrder`, {
     method: 'POST',
@@ -205,23 +223,26 @@ export async function placeIshareOrder({ network, phone, dataAmount, token = GHD
       'Content-Type': 'application/json',
       'Accept': 'application/json'
     },
-    body: JSON.stringify({ 
-      network: network, 
-      phone: phone, 
+    body: JSON.stringify({
+      network: network,
+      phone: phone,
       amount: dataAmount // Amount in MB
     })
   });
-  
+
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(`iShare API error: ${response.status} - ${errorText}`);
   }
-  
+
   const data = await response.json();
   return data;
 }
 
-// Get wallet balance
+/**
+ * Get GHData wallet balance
+ * Endpoint: GET /v1/getWalletBalance
+ */
 export async function getGHDataWalletBalance(token = GHDATA_TOKEN) {
   const response = await fetch(`${GHDATA_BASE}/v1/getWalletBalance`, {
     method: 'GET',
@@ -231,16 +252,19 @@ export async function getGHDataWalletBalance(token = GHDATA_TOKEN) {
       'Accept': 'application/json'
     }
   });
-  
+
   if (!response.ok) {
     throw new Error(`Failed to get wallet balance: ${response.status}`);
   }
-  
+
   const data = await response.json();
   return data;
 }
 
-// Check transaction status
+/**
+ * Check transaction status
+ * Endpoint: GET /v1/checkOrderStatus/:reference
+ */
 export async function checkGHDataOrderStatus(reference, token = GHDATA_TOKEN) {
   const response = await fetch(`${GHDATA_BASE}/v1/checkOrderStatus/${reference}`, {
     method: 'GET',
@@ -250,11 +274,33 @@ export async function checkGHDataOrderStatus(reference, token = GHDATA_TOKEN) {
       'Accept': 'application/json'
     }
   });
-  
+
   if (!response.ok) {
     throw new Error(`Failed to check order status: ${response.status}`);
   }
-  
+
+  const data = await response.json();
+  return data;
+}
+
+/**
+ * Get all available networks
+ * Endpoint: GET /v1/getAllNetworks
+ */
+export async function getGHDataNetworks(token = GHDATA_TOKEN) {
+  const response = await fetch(`${GHDATA_BASE}/v1/getAllNetworks`, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to get networks: ${response.status}`);
+  }
+
   const data = await response.json();
   return data;
 }
