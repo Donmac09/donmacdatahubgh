@@ -5,7 +5,7 @@ const useAuthStore = create((set, get) => ({
   user: null,
   profile: null,
   loading: true,
-  storefront: null, // { store, reseller } when browsing as storefront customer
+  storefront: null,
 
   setStorefront: (sf) => set({ storefront: sf }),
 
@@ -43,7 +43,6 @@ const useAuthStore = create((set, get) => ({
   register: async (email, password, meta) => {
     const data = await signUp(email, password, meta)
     if (data.user) {
-      // Wait a moment for trigger to create profile
       await new Promise(r => setTimeout(r, 800))
       try {
         const profile = await getProfile(data.user.id)
@@ -59,6 +58,8 @@ const useAuthStore = create((set, get) => ({
   logout: async () => {
     await signOut()
     set({ user: null, profile: null, storefront: null })
+    // Force a hard redirect to login page
+    window.location.href = '/login'
   },
 
   refreshProfile: async () => {
@@ -75,14 +76,10 @@ const useAuthStore = create((set, get) => ({
 
   isAdmin: () => get().profile?.email === 'donmacdatahub@gmail.com' || get().profile?.role === 'admin',
   isReseller: () => ['reseller', 'admin'].includes(get().profile?.role),
-  
-  // NEW: Check if user is a customer
   isCustomer: () => {
     const profile = get().profile
     return profile?.role === 'customer' || (!profile?.role && !profile?.is_reseller)
   },
-  
-  // NEW: Check if user can access admin/reseller dashboard
   canAccessDashboard: () => {
     const profile = get().profile
     return ['admin', 'reseller'].includes(profile?.role)
