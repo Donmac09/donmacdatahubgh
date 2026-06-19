@@ -24,6 +24,8 @@ export default function BuyModal({ groupKey, item, price, onClose }) {
       phone,
       groupKey,
       network: group.network,
+      ghdata_type: group.ghdata_type, // ADD THIS LINE
+      isManual: group.ghdata_type === 'mtn-ishare', // FLAG FOR MANUAL DELIVERY
     })
     toast.success('Added to cart!')
     onClose()
