@@ -102,7 +102,7 @@ export const PACKAGES = {
     network: 'AirtelTigo',
     networkKey: 'airtel',
     validity: '60 days',
-    ghdata_type: 'at',
+    ghdata_type: 'atishare',
     color: '#005A9C', 
     textColor: '#ffffff', 
     bgColor: 'rgba(0, 90, 156, 0.1)',
@@ -131,7 +131,7 @@ export const PACKAGES = {
     network: 'AirtelTigo',
     networkKey: 'airtel',
     validity: 'Non-expiry',
-    ghdata_type: 'at',
+    ghdata_type: 'atbigtime',
     color: '#005A9C', 
     textColor: '#ffffff', 
     bgColor: 'rgba(0, 90, 156, 0.1)',
@@ -176,14 +176,85 @@ export function getPriceForUser(itemId, resellerPrices) {
 }
 
 export const GHDATA_TOKEN = '144|Upj7FsClobi8bIWLBWozmXOTRUzSDK2DCx0u2vuD3f64701d';
-export const GHDATA_BASE = 'https://ghdata.pro/api/v2';
+export const GHDATA_BASE = 'https://ghdataconnect.com/api';
 
 export async function placeGHDataOrder({ network, phone, dataAmount, token = GHDATA_TOKEN }) {
-  const response = await fetch(`${GHDATA_BASE}/data`, {
+  const response = await fetch(`${GHDATA_BASE}/v1/purchaseBundle`, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', 'Accept': 'application/json' },
-    body: JSON.stringify({ network, phone, data_amount: dataAmount, bypass: false, 'sim-type': 'Noraml SIM' })
+    body: JSON.stringify({ network, phone, amount: dataAmount, bypass: false, 'sim-type': 'Noraml SIM' })
   });
+  const data = await response.json();
+  return data;
+}
+if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`GHData API error: ${response.status} - ${errorText}`);
+  }
+  
+  const data = await response.json();
+  return data;
+}
+
+// For iShare bundles (MTN Mashup)
+export async function placeIshareOrder({ network, phone, dataAmount, token = GHDATA_TOKEN }) {
+  const response = await fetch(`${GHDATA_BASE}/v1/createIshareBundleOrder`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    },
+    body: JSON.stringify({ 
+      network: network, 
+      phone: phone, 
+      amount: dataAmount // Amount in MB
+    })
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`iShare API error: ${response.status} - ${errorText}`);
+  }
+  
+  const data = await response.json();
+  return data;
+}
+
+// Get wallet balance
+export async function getGHDataWalletBalance(token = GHDATA_TOKEN) {
+  const response = await fetch(`${GHDATA_BASE}/v1/getWalletBalance`, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    }
+  });
+  
+  if (!response.ok) {
+    throw new Error(`Failed to get wallet balance: ${response.status}`);
+  }
+  
+  const data = await response.json();
+  return data;
+}
+
+// Check transaction status
+export async function checkGHDataOrderStatus(reference, token = GHDATA_TOKEN) {
+  const response = await fetch(`${GHDATA_BASE}/v1/checkOrderStatus/${reference}`, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    }
+  });
+  
+  if (!response.ok) {
+    throw new Error(`Failed to check order status: ${response.status}`);
+  }
+  
   const data = await response.json();
   return data;
 }
