@@ -1,9 +1,12 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import useAuthStore from '../store/authStore'
+import { supabase } from '../lib/supabase'
 import { Btn, Input } from '../components/ui'
 import toast from 'react-hot-toast'
 
 export default function Login() {
+  const navigate = useNavigate()
   const { login } = useAuthStore()
   const [form, setForm] = useState({ email: '', password: '' })
   const [loading, setLoading] = useState(false)
@@ -15,9 +18,40 @@ export default function Login() {
     setLoading(true); setErr('')
     try {
       const profile = await login(form.email, form.password)
+      
       if (profile?.status === 'blocked') {
         toast.error('Account blocked. Contact support.')
         await useAuthStore.getState().logout()
+        setLoading(false)
+        return
+      }
+
+      // Redirect based on role
+      if (profile?.role === 'admin' || profile?.role === 'reseller') {
+        // Admin/Reseller goes to dashboard
+        navigate('/dashboard')
+        toast.success(`Welcome back, ${profile.name || 'Admin'}!`)
+      } else {
+        // Customer - redirect to their reseller's store or access denied
+        if (profile?.reseller_id) {
+          // Get the store slug for this reseller
+          const { data: store, error } = await supabase
+            .from('stores')
+            .select('slug')
+            .eq('reseller_id', profile.reseller_id)
+            .single()
+          
+          if (store?.slug) {
+            navigate(`/store/${store.slug}`)
+            toast.success('Welcome to your reseller store!')
+          } else {
+            navigate('/store/access-denied')
+            toast.error('Store not found')
+          }
+        } else {
+          navigate('/store/access-denied')
+          toast.error('Access denied. Contact your reseller.')
+        }
       }
     } catch (e) {
       setErr(e.message || 'Invalid email or password')
