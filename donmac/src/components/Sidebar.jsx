@@ -22,6 +22,12 @@ export default function Sidebar({ page, setPage, collapsed, setCollapsed }) {
     ...(_isAdmin ? ADMIN_NAV : []),
   ]
 
+  // Handle logout with redirect
+  const handleLogout = async () => {
+    await logout()
+    // The logout function in authStore now handles redirect
+  }
+
   return (
     <aside className={cls(
       'fixed left-0 top-0 h-screen z-30 flex flex-col transition-all duration-300 ease-in-out',
@@ -77,7 +83,8 @@ export default function Sidebar({ page, setPage, collapsed, setCollapsed }) {
             <p className="text-xs text-slate-400 truncate capitalize">{profile?.role}</p>
           </div>
         )}
-        <button onClick={logout}
+        <button 
+          onClick={handleLogout}
           className={cls('w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-red-400 hover:bg-red-500/10 hover:text-red-300 transition text-sm font-medium', collapsed && 'justify-center')}>
           <span className="text-lg">🚪</span>
           {!collapsed && 'Sign Out'}
