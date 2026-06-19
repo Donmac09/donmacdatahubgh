@@ -1,4 +1,4 @@
- import { cls } from '../lib/utils'
+import { cls } from '../lib/utils'
 import useAuthStore from '../store/authStore'
 
 const NAV = [
