@@ -24,16 +24,32 @@ export default function AppLayout() {
   useEffect(() => {
     if (!loading) {
       if (!canAccessDashboard()) {
-        // Customer - redirect to storefront or access denied
-        if (profile?.reseller_id) {
-          // If they belong to a reseller, redirect to that store
-          navigate('/store/access-denied')
-        } else {
-          navigate('/store/access-denied')
-        }
+        // Use setTimeout to allow state to settle
+        setTimeout(() => {
+          if (profile?.reseller_id) {
+            // Try to get store slug and redirect
+            supabase
+              .from('stores')
+              .select('slug')
+              .eq('reseller_id', profile.reseller_id)
+              .single()
+              .then(({ data }) => {
+                if (data?.slug) {
+                  window.location.href = `/store/${data.slug}`
+                } else {
+                  window.location.href = '/store/access-denied'
+                }
+              })
+              .catch(() => {
+                window.location.href = '/store/access-denied'
+              })
+          } else {
+            window.location.href = '/store/access-denied'
+          }
+        }, 300)
       }
     }
-  }, [loading, profile, navigate])
+  }, [loading, profile])
 
   // Responsive: collapse sidebar on mobile by default
   useEffect(() => {
@@ -55,7 +71,7 @@ export default function AppLayout() {
     )
   }
 
-  // If customer, don't render (will be redirected by useEffect)
+  // If customer, don't render (will be redirected)
   if (!canAccessDashboard()) {
     return null
   }
@@ -69,7 +85,6 @@ export default function AppLayout() {
       <div className={`${leftPad} transition-all duration-300 min-h-screen`}>
         <Topbar page={page} setPage={setPage} collapsed={collapsed} />
 
-        {/* Page Content — offset for topbar (64px) + announcement banner (42px if shown) */}
         <main className="pt-16 px-4 sm:px-6 pb-8 min-h-screen">
           <div className="max-w-7xl mx-auto pt-5">
             {page === 'dashboard'    && <Dashboard setPage={setPage} />}
@@ -83,10 +98,8 @@ export default function AppLayout() {
         </main>
       </div>
 
-      {/* Cart Drawer */}
       {cartOpen && <CartDrawer />}
 
-      {/* Floating WhatsApp */}
       <a href="https://wa.me/2330549358359" target="_blank" rel="noopener noreferrer"
         className="fixed bottom-6 left-5 z-40 w-14 h-14 bg-green-500 hover:bg-green-600 rounded-full flex items-center justify-center shadow-xl shadow-green-500/40 transition-all hover:scale-110">
         <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
@@ -94,7 +107,6 @@ export default function AppLayout() {
         </svg>
       </a>
 
-      {/* Floating Cart Button when drawer closed */}
       {!cartOpen && (
         <button onClick={() => useCartStore.getState().setOpen(true)}
           className="fixed bottom-6 right-5 z-40 w-14 h-14 bg-indigo-600 hover:bg-indigo-700 rounded-full flex items-center justify-center shadow-xl shadow-indigo-500/40 transition-all hover:scale-110">
