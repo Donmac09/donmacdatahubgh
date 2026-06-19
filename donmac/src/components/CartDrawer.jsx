@@ -4,7 +4,7 @@ import useAuthStore from '../store/authStore'
 import { formatCurrency } from '../lib/utils'
 import { Btn } from './ui'
 import { supabase } from '../lib/supabase'
-import { PACKAGES, placeGHDataOrder } from '../lib/packages'
+import { PACKAGES, placeGHDataOrder, placeIshareOrder } from '../lib/packages'
 import { generateRef } from '../lib/utils'
 import { sounds } from '../lib/sounds'
 import toast from 'react-hot-toast'
@@ -15,6 +15,29 @@ export default function CartDrawer({ onOrderPlaced }) {
   const [loading, setLoading] = useState(false)
 
   const totalAmount = items.reduce((s, i) => s + (i.price || 0), 0)
+
+  /**
+   * Extract numeric value from package data string
+   * e.g., "1.7GB" -> 1.7, "350mins + 870MB" -> 870
+   */
+  function extractNumericAmount(dataString) {
+    // Try to extract GB value first
+    const gbMatch = dataString.match(/([\d.]+)\s*GB/i)
+    if (gbMatch) {
+      return parseFloat(gbMatch[1])
+    }
+    // Try to extract MB value
+    const mbMatch = dataString.match(/([\d.]+)\s*MB/i)
+    if (mbMatch) {
+      return parseFloat(mbMatch[1])
+    }
+    // Try to extract any number
+    const numMatch = dataString.match(/([\d.]+)/)
+    if (numMatch) {
+      return parseFloat(numMatch[1])
+    }
+    return 1 // fallback
+  }
 
   async function handleCheckout() {
     if (!profile) return
@@ -47,8 +70,8 @@ export default function CartDrawer({ onOrderPlaced }) {
           cost_price: item.costPrice || item.price,
           profit: (item.price - (item.costPrice || item.price)),
           status: 'pending',
-          ghdata_type: group?.ghdata_type || null, // ADD THIS
-          is_manual: isManual, // ADD THIS - flags MTN Mashup for manual delivery
+          ghdata_type: group?.ghdata_type || null,
+          is_manual: isManual,
           item_data: {
             data: item.data,
             groupKey: item.groupKey,
@@ -81,18 +104,45 @@ export default function CartDrawer({ onOrderPlaced }) {
           type: 'order',
         })
 
-        // ONLY send to GHData if NOT a manual package
+        // Send to GHData if NOT a manual package
         if (!isManual && group?.ghdata_type && group.ghdata_type !== 'mtn-ishare') {
           try {
-            await placeGHDataOrder({ 
-              network: group.ghdata_type, 
-              phone: item.phone, 
-              dataAmount: item.data 
-            })
+            const numericAmount = extractNumericAmount(item.data)
+            
+            // For AirtelTigo Premium and Big Time
+            if (group.ghdata_type === 'atishare' || group.ghdata_type === 'atbigtime') {
+              await placeGHDataOrder({
+                network: group.ghdata_type,
+                phone: item.phone,
+                dataAmount: numericAmount
+              })
+            } else {
+              // MTN and Telecel
+              await placeGHDataOrder({
+                network: group.ghdata_type,
+                phone: item.phone,
+                dataAmount: numericAmount
+              })
+            }
+            console.log(`✅ GHData order placed: ${ref}`)
           } catch (ghError) {
             console.error('GHData delivery failed:', ghError)
             // Don't throw - order is already created
             // Admin will need to process manually
+          }
+        } else if (isManual) {
+          // MTN Mashup - use iShare endpoint
+          try {
+            const numericAmount = extractNumericAmount(item.data)
+            await placeIshareOrder({
+              network: 'mtn',
+              phone: item.phone,
+              dataAmount: numericAmount * 1000 // Convert GB to MB if needed
+            })
+            console.log(`✅ iShare order placed: ${ref}`)
+          } catch (ghError) {
+            console.error('iShare delivery failed:', ghError)
+            // Don't throw - order is already created
           }
         } else {
           // Log that this is a manual order
