@@ -22,6 +22,8 @@ export default function MyStore() {
   const [activeTab, setActiveTab] = useState('overview')
   const [editStore, setEditStore] = useState(false)
   const [editStoreForm, setEditStoreForm] = useState({})
+  const [storeOrders, setStoreOrders] = useState([])
+  const [storeStats, setStoreStats] = useState({ totalSales: 0, totalOrders: 0, totalProfit: 0 })
 
   const hasStore = !!profile?.store?.id
 
@@ -29,6 +31,8 @@ export default function MyStore() {
     if (hasStore) {
       loadPrices()
       loadWithdrawals()
+      loadStoreOrders()
+      loadStoreStats()
     }
   }, [profile?.id, hasStore])
 
@@ -53,6 +57,39 @@ export default function MyStore() {
     } catch (e) { console.error(e) }
   }
 
+  async function loadStoreOrders() {
+    try {
+      const { data } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('reseller_id', profile.id)
+        .order('created_at', { ascending: false })
+        .limit(20)
+      setStoreOrders(data || [])
+    } catch (e) { console.error(e) }
+  }
+
+  async function loadStoreStats() {
+    try {
+      // Get total sales and profit from completed orders
+      const { data } = await supabase
+        .from('orders')
+        .select('amount, profit')
+        .eq('reseller_id', profile.id)
+        .eq('status', 'completed')
+      
+      if (data) {
+        const totalSales = data.reduce((sum, order) => sum + (order.amount || 0), 0)
+        const totalProfit = data.reduce((sum, order) => sum + (order.profit || 0), 0)
+        setStoreStats({
+          totalSales,
+          totalOrders: data.length,
+          totalProfit
+        })
+      }
+    } catch (e) { console.error(e) }
+  }
+
   function validateSlug(val) {
     const clean = val.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
     return clean
@@ -60,7 +97,7 @@ export default function MyStore() {
 
   async function checkSlugAvailable(slug) {
     const { data } = await supabase.from('stores').select('id').eq('slug', slug).single()
-    return !data // true = available
+    return !data
   }
 
   async function handleCreateStore() {
@@ -99,7 +136,11 @@ export default function MyStore() {
     if (!name.trim()) { toast.error('Store name is required'); return }
     if (!whatsapp.trim()) { toast.error('WhatsApp number is required'); return }
     try {
-      await supabase.from('stores').update({ name: name.trim(), whatsapp: whatsapp.trim(), welcome: welcome.trim() }).eq('id', profile.store.id)
+      await supabase.from('stores').update({ 
+        name: name.trim(), 
+        whatsapp: whatsapp.trim(), 
+        welcome: welcome.trim() 
+      }).eq('id', profile.store.id)
       await refreshProfile()
       setEditStore(false)
       toast.success('Store updated!')
@@ -121,16 +162,24 @@ export default function MyStore() {
     if (!amt || amt < 30) { toast.error('Minimum withdrawal is ₵30'); return }
     if (amt > (profile.profit || 0)) { toast.error('Insufficient profit balance'); return }
     try {
-      await supabase.from('withdrawals').insert({ reseller_id: profile.id, amount: amt, status: 'pending' })
+      await supabase.from('withdrawals').insert({ 
+        reseller_id: profile.id, 
+        amount: amt, 
+        status: 'pending',
+        bank_name: 'MTN MoMo',
+        account_number: profile.phone || 'N/A'
+      })
       toast.success('Withdrawal request submitted!')
       setShowWdModal(false)
       setWdAmount('')
       loadWithdrawals()
+      await refreshProfile()
     } catch (e) { toast.error(e.message) }
   }
 
   const shareLink = hasStore ? `${window.location.origin}/store/${profile.store.slug}` : ''
   const totalWithdrawn = withdrawals.filter(w => w.status === 'paid').reduce((s, w) => s + (w.amount || 0), 0)
+  const pendingWithdrawals = withdrawals.filter(w => w.status === 'pending').reduce((s, w) => s + (w.amount || 0), 0)
 
   // ── CREATE STORE SCREEN ──────────────────────────────────────
   if (!hasStore) {
@@ -308,9 +357,9 @@ export default function MyStore() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
           { label: 'Total Profit', value: formatCurrency(profile.profit || 0), color: 'text-emerald-600', bg: 'bg-emerald-50' },
-          { label: 'Total Withdrawn', value: formatCurrency(totalWithdrawn), color: 'text-indigo-600', bg: 'bg-indigo-50' },
-          { label: 'Pending Requests', value: withdrawals.filter(w => w.status === 'pending').length, color: 'text-amber-600', bg: 'bg-amber-50' },
-          { label: 'WhatsApp', value: profile.store.whatsapp, color: 'text-green-600', bg: 'bg-green-50' },
+          { label: 'Total Sales', value: formatCurrency(storeStats.totalSales), color: 'text-blue-600', bg: 'bg-blue-50' },
+          { label: 'Total Orders', value: storeStats.totalOrders, color: 'text-purple-600', bg: 'bg-purple-50' },
+          { label: 'Pending Withdrawals', value: formatCurrency(pendingWithdrawals), color: 'text-amber-600', bg: 'bg-amber-50' },
         ].map(s => (
           <Card key={s.label} className="p-4 text-center">
             <div className={`${s.bg} rounded-xl p-3 mb-2`}>
@@ -335,26 +384,61 @@ export default function MyStore() {
 
       {/* ── Overview Tab ── */}
       {activeTab === 'overview' && (
-        <Card className="p-6">
-          <h3 className="font-bold text-gray-900 mb-4">Store Information</h3>
-          <div className="grid sm:grid-cols-2 gap-4">
-            {[
-              { label: 'Store Name', value: profile.store.name },
-              { label: 'Store Slug', value: `/${profile.store.slug}` },
-              { label: 'WhatsApp', value: profile.store.whatsapp },
-              { label: 'Welcome Message', value: profile.store.welcome || '(none set)' },
-            ].map(f => (
-              <div key={f.label} className="bg-gray-50 rounded-xl p-4">
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">{f.label}</p>
-                <p className="text-sm font-semibold text-gray-800">{f.value}</p>
+        <>
+          <Card className="p-6">
+            <h3 className="font-bold text-gray-900 mb-4">Store Information</h3>
+            <div className="grid sm:grid-cols-2 gap-4">
+              {[
+                { label: 'Store Name', value: profile.store.name },
+                { label: 'Store Slug', value: `/${profile.store.slug}` },
+                { label: 'WhatsApp', value: profile.store.whatsapp },
+                { label: 'Welcome Message', value: profile.store.welcome || '(none set)' },
+              ].map(f => (
+                <div key={f.label} className="bg-gray-50 rounded-xl p-4">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">{f.label}</p>
+                  <p className="text-sm font-semibold text-gray-800">{f.value}</p>
+                </div>
+              ))}
+            </div>
+            <Btn onClick={() => { setEditStoreForm({ name: profile.store.name, whatsapp: profile.store.whatsapp, welcome: profile.store.welcome || '' }); setEditStore(true) }}
+              variant="secondary" size="sm" className="mt-5">
+              ✏️ Edit Store Info
+            </Btn>
+          </Card>
+
+          {/* Recent Orders */}
+          {storeOrders.length > 0 && (
+            <Card className="p-6">
+              <h3 className="font-bold text-gray-900 mb-4">Recent Orders</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-gray-400 border-b">
+                      <th className="pb-2 font-semibold">Order ID</th>
+                      <th className="pb-2 font-semibold">Customer</th>
+                      <th className="pb-2 font-semibold">Package</th>
+                      <th className="pb-2 font-semibold">Amount</th>
+                      <th className="pb-2 font-semibold">Status</th>
+                      <th className="pb-2 font-semibold">Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {storeOrders.map(order => (
+                      <tr key={order.id} className="border-b border-gray-50">
+                        <td className="py-2 text-xs font-mono text-gray-500">#{order.id.slice(0, 8)}</td>
+                        <td className="py-2 text-xs">{order.customer_name || 'N/A'}</td>
+                        <td className="py-2 text-xs">{order.package_name || 'N/A'}</td>
+                        <td className="py-2 text-xs font-semibold">{formatCurrency(order.amount)}</td>
+                        <td className="py-2"><StatusBadge status={order.status} /></td>
+                        <td className="py-2 text-xs text-gray-400">{formatDate(order.created_at)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            ))}
-          </div>
-          <Btn onClick={() => { setEditStoreForm({ name: profile.store.name, whatsapp: profile.store.whatsapp, welcome: profile.store.welcome || '' }); setEditStore(true) }}
-            variant="secondary" size="sm" className="mt-5">
-            ✏️ Edit Store Info
-          </Btn>
-        </Card>
+            </Card>
+          )}
+        </>
       )}
 
       {/* ── Prices Tab ── */}
@@ -446,12 +530,13 @@ export default function MyStore() {
             {withdrawals.length === 0 ? (
               <Empty icon="💸" title="No withdrawals yet" description="Request your first withdrawal when you have ₵30+ profit" />
             ) : (
-              <Table headers={['Date', 'Amount', 'Status']}>
+              <Table headers={['Date', 'Amount', 'Status', 'Reference']}>
                 {withdrawals.map(w => (
                   <tr key={w.id} className="hover:bg-gray-50 transition">
                     <Td className="text-xs text-gray-400">{formatDate(w.created_at)}</Td>
                     <Td><span className="font-bold text-gray-900">{formatCurrency(w.amount)}</span></Td>
                     <Td><StatusBadge status={w.status} /></Td>
+                    <Td className="text-xs text-gray-400">{w.reference || '—'}</Td>
                   </tr>
                 ))}
               </Table>
