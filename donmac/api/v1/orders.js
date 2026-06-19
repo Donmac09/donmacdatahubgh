@@ -48,8 +48,12 @@ export default async function handler(req, res) {
         package: pkg, 
         phone, 
         package_key,
-        ghdata_type, // ADD THIS
-        is_manual // ADD THIS
+        ghdata_type,
+        is_manual,
+        amount,
+        cost_price,
+        profit,
+        item_data
       } = req.body
       
       if (!network || !pkg || !phone) {
@@ -58,10 +62,6 @@ export default async function handler(req, res) {
       
       const ref = generateRef()
       
-      // Get the package price from PACKAGES
-      // Since we can't import PACKAGES here, we need to pass price from frontend
-      // or look it up
-      
       const { data: order, error } = await supabase
         .from('orders')
         .insert({
@@ -69,12 +69,15 @@ export default async function handler(req, res) {
           user_id: user.id,
           network,
           package: pkg,
-          package_key,
+          package_key: package_key || pkg,
           phone,
-          amount: 0,
+          amount: amount || 0,
+          cost_price: cost_price || 0,
+          profit: profit || 0,
           status: 'pending',
-          ghdata_type: ghdata_type || null, // ADD THIS
-          is_manual: is_manual || false, // ADD THIS
+          ghdata_type: ghdata_type || null,
+          is_manual: is_manual || false,
+          item_data: item_data || null,
         })
         .select()
         .single()
