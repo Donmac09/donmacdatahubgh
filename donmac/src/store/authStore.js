@@ -29,6 +29,8 @@ const useAuthStore = create((set, get) => ({
         } catch {}
       } else if (event === 'SIGNED_OUT') {
         set({ user: null, profile: null, storefront: null })
+        // After state is cleared, redirect to login
+        window.location.href = '/login'
       }
     })
   },
@@ -58,8 +60,10 @@ const useAuthStore = create((set, get) => ({
   logout: async () => {
     await signOut()
     set({ user: null, profile: null, storefront: null })
-    // Force a hard redirect to login page
-    window.location.href = '/login'
+    // Use setTimeout to ensure state is cleared before redirect
+    setTimeout(() => {
+      window.location.href = '/login'
+    }, 100)
   },
 
   refreshProfile: async () => {
