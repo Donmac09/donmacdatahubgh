@@ -25,16 +25,16 @@ export default function Login() {
         return
       }
 
+      // Wait for auth state to fully update
+      await new Promise(resolve => setTimeout(resolve, 500))
+
       // Redirect based on role
       if (profile?.role === 'admin' || profile?.role === 'reseller') {
-        // Admin/Reseller goes to dashboard
         navigate('/dashboard')
         toast.success(`Welcome back, ${profile.name || 'Admin'}!`)
       } else {
         // Customer - redirect to storefront
-        // Check if customer has a reseller_id
         if (profile?.reseller_id) {
-          // Get the store for this reseller
           const { data: store, error } = await supabase
             .from('stores')
             .select('slug')
@@ -42,28 +42,26 @@ export default function Login() {
             .single()
           
           if (store?.slug) {
-            // Redirect to the store's slug
-            navigate(`/store/${store.slug}`)
-            toast.success('Welcome to your reseller store!')
+            // Use window.location for hard redirect to ensure page reloads
+            window.location.href = `/store/${store.slug}`
           } else {
-            // No store found for this reseller
             toast.error('Store not found for your reseller.')
             navigate('/')
           }
         } else {
-          // Customer has no reseller assigned
           toast.error('No reseller assigned to your account.')
           navigate('/')
         }
       }
     } catch (e) {
       setErr(e.message || 'Invalid email or password')
-    } finally { setLoading(false) }
+    } finally { 
+      setLoading(false) 
+    }
   }
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900">
-      {/* Animated background blobs */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-1/4 left-1/4 w-72 h-72 bg-indigo-500/10 rounded-full blur-3xl animate-pulse" />
         <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
@@ -71,7 +69,6 @@ export default function Login() {
       </div>
 
       <div className="relative w-full max-w-md animate-slide-up">
-        {/* Logo */}
         <div className="text-center mb-8">
           <div className="w-20 h-20 mx-auto rounded-3xl bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center text-4xl shadow-2xl shadow-orange-500/30 animate-float mb-4">
             📡
@@ -80,7 +77,6 @@ export default function Login() {
           <p className="text-slate-400 text-sm mt-1">Your trusted data marketplace</p>
         </div>
 
-        {/* Card */}
         <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl">
           <h2 className="text-xl font-bold text-white mb-6 text-center">Welcome back 👋</h2>
 
