@@ -118,12 +118,17 @@ export default function MyStore() {
 
   async function loadStoreOrders() {
     try {
+      // Join with profiles to get customer name
       const { data } = await supabase
         .from('orders')
-        .select('*')
+        .select(`
+          *,
+          customer:user_id(name, phone)
+        `)
         .eq('reseller_id', profile.id)
         .order('created_at', { ascending: false })
         .limit(20)
+      
       setStoreOrders(data || [])
     } catch (e) { console.error('Error loading orders:', e) }
   }
@@ -521,7 +526,7 @@ export default function MyStore() {
             </Btn>
           </Card>
 
-          {/* Recent Orders */}
+          {/* Recent Orders - FIXED */}
           {storeOrders.length > 0 && (
             <Card className="p-6">
               <h3 className="font-bold text-gray-900 mb-4">Recent Orders</h3>
@@ -541,8 +546,12 @@ export default function MyStore() {
                     {storeOrders.map(order => (
                       <tr key={order.id} className="border-b border-gray-50">
                         <td className="py-2 text-xs font-mono text-gray-500">#{order.id.slice(0, 8)}</td>
-                        <td className="py-2 text-xs">{order.customer_name || 'N/A'}</td>
-                        <td className="py-2 text-xs">{order.package_name || 'N/A'}</td>
+                        <td className="py-2 text-xs">
+                          {order.customer?.name || order.customer_name || 'N/A'}
+                        </td>
+                        <td className="py-2 text-xs">
+                          {order.package || order.package_name || 'N/A'}
+                        </td>
                         <td className="py-2 text-xs font-semibold">{formatCurrency(order.amount)}</td>
                         <td className="py-2"><StatusBadge status={order.status} /></td>
                         <td className="py-2 text-xs text-gray-400">{formatDate(order.created_at)}</td>
@@ -650,7 +659,7 @@ export default function MyStore() {
                   <tr key={w.id} className="hover:bg-gray-50 transition">
                     <Td className="text-xs text-gray-400">{formatDate(w.created_at)}</Td>
                     <Td><span className="font-bold text-gray-900">{formatCurrency(w.amount)}</span></Td>
-                    <Td><StatusBadge status={w.status} /></Td>
+                    <Td><StatusBadge status={w.status} /></td>
                     <Td className="text-xs text-gray-400">{w.reference || '—'}</Td>
                   </tr>
                 ))}
