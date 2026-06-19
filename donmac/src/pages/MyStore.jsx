@@ -24,8 +24,41 @@ export default function MyStore() {
   const [editStoreForm, setEditStoreForm] = useState({})
   const [storeOrders, setStoreOrders] = useState([])
   const [storeStats, setStoreStats] = useState({ totalSales: 0, totalOrders: 0, totalProfit: 0 })
+  const [loading, setLoading] = useState(true)
+  const [hasStore, setHasStore] = useState(false)
 
-  const hasStore = !!profile?.store?.id
+  // Check if user has a store
+  useEffect(() => {
+    checkStoreStatus()
+  }, [profile?.id])
+
+  async function checkStoreStatus() {
+    setLoading(true)
+    try {
+      // Directly check if user has a store from the database
+      const { data, error } = await supabase
+        .from('stores')
+        .select('id, name, slug, whatsapp, welcome')
+        .eq('reseller_id', profile?.id)
+        .single()
+
+      if (data) {
+        // User has a store - update profile with store data
+        setHasStore(true)
+        // Update profile store data if not already there
+        if (!profile?.store) {
+          await refreshProfile()
+        }
+      } else {
+        setHasStore(false)
+      }
+    } catch (error) {
+      console.error('Error checking store:', error)
+      setHasStore(false)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
     if (hasStore) {
@@ -34,7 +67,7 @@ export default function MyStore() {
       loadStoreOrders()
       loadStoreStats()
     }
-  }, [profile?.id, hasStore])
+  }, [hasStore, profile?.id])
 
   async function loadPrices() {
     try {
@@ -71,7 +104,6 @@ export default function MyStore() {
 
   async function loadStoreStats() {
     try {
-      // Get total sales and profit from completed orders
       const { data } = await supabase
         .from('orders')
         .select('amount, profit')
@@ -123,6 +155,8 @@ export default function MyStore() {
         welcome: welcome.trim(),
       })
       await refreshProfile()
+      // After creating store, check again
+      await checkStoreStatus()
       toast.success('🎉 Your store has been created!')
     } catch (e) {
       toast.error(e.message || 'Failed to create store')
@@ -177,9 +211,21 @@ export default function MyStore() {
     } catch (e) { toast.error(e.message) }
   }
 
-  const shareLink = hasStore ? `${window.location.origin}/store/${profile.store.slug}` : ''
+  const shareLink = hasStore ? `${window.location.origin}/store/${profile?.store?.slug || ''}` : ''
   const totalWithdrawn = withdrawals.filter(w => w.status === 'paid').reduce((s, w) => s + (w.amount || 0), 0)
   const pendingWithdrawals = withdrawals.filter(w => w.status === 'pending').reduce((s, w) => s + (w.amount || 0), 0)
+
+  // Show loading state
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <p className="mt-4 text-gray-500">Loading your store...</p>
+        </div>
+      </div>
+    )
+  }
 
   // ── CREATE STORE SCREEN ──────────────────────────────────────
   if (!hasStore) {
@@ -314,9 +360,9 @@ export default function MyStore() {
               <span className="text-indigo-300 text-xs font-semibold uppercase tracking-widest">My Reseller Store</span>
               <span className="bg-green-500/20 text-green-300 text-[10px] font-bold px-2 py-0.5 rounded-full">● LIVE</span>
             </div>
-            <h2 className="text-2xl font-black">{profile.store.name}</h2>
-            <p className="text-indigo-300 text-sm mt-0.5">📱 {profile.store.whatsapp}</p>
-            {profile.store.welcome && (
+            <h2 className="text-2xl font-black">{profile?.store?.name || 'Your Store'}</h2>
+            <p className="text-indigo-300 text-sm mt-0.5">📱 {profile?.store?.whatsapp || 'N/A'}</p>
+            {profile?.store?.welcome && (
               <p className="text-slate-400 text-xs mt-2 max-w-md italic">"{profile.store.welcome}"</p>
             )}
           </div>
@@ -324,7 +370,7 @@ export default function MyStore() {
           {/* Profit Card */}
           <div className="bg-white/10 backdrop-blur-sm rounded-2xl px-6 py-4 text-center min-w-[160px] border border-white/10">
             <p className="text-indigo-200 text-xs font-semibold uppercase tracking-wider mb-1">Profit Balance</p>
-            <p className="text-4xl font-black text-white">{formatCurrency(profile.profit || 0)}</p>
+            <p className="text-4xl font-black text-white">{formatCurrency(profile?.profit || 0)}</p>
             <Btn
               onClick={() => setShowWdModal(true)}
               variant="warning"
@@ -356,7 +402,7 @@ export default function MyStore() {
       {/* Stats row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
-          { label: 'Total Profit', value: formatCurrency(profile.profit || 0), color: 'text-emerald-600', bg: 'bg-emerald-50' },
+          { label: 'Total Profit', value: formatCurrency(profile?.profit || 0), color: 'text-emerald-600', bg: 'bg-emerald-50' },
           { label: 'Total Sales', value: formatCurrency(storeStats.totalSales), color: 'text-blue-600', bg: 'bg-blue-50' },
           { label: 'Total Orders', value: storeStats.totalOrders, color: 'text-purple-600', bg: 'bg-purple-50' },
           { label: 'Pending Withdrawals', value: formatCurrency(pendingWithdrawals), color: 'text-amber-600', bg: 'bg-amber-50' },
@@ -389,10 +435,10 @@ export default function MyStore() {
             <h3 className="font-bold text-gray-900 mb-4">Store Information</h3>
             <div className="grid sm:grid-cols-2 gap-4">
               {[
-                { label: 'Store Name', value: profile.store.name },
-                { label: 'Store Slug', value: `/${profile.store.slug}` },
-                { label: 'WhatsApp', value: profile.store.whatsapp },
-                { label: 'Welcome Message', value: profile.store.welcome || '(none set)' },
+                { label: 'Store Name', value: profile?.store?.name || 'N/A' },
+                { label: 'Store Slug', value: `/${profile?.store?.slug || 'N/A'}` },
+                { label: 'WhatsApp', value: profile?.store?.whatsapp || 'N/A' },
+                { label: 'Welcome Message', value: profile?.store?.welcome || '(none set)' },
               ].map(f => (
                 <div key={f.label} className="bg-gray-50 rounded-xl p-4">
                   <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">{f.label}</p>
@@ -400,7 +446,7 @@ export default function MyStore() {
                 </div>
               ))}
             </div>
-            <Btn onClick={() => { setEditStoreForm({ name: profile.store.name, whatsapp: profile.store.whatsapp, welcome: profile.store.welcome || '' }); setEditStore(true) }}
+            <Btn onClick={() => { setEditStoreForm({ name: profile?.store?.name || '', whatsapp: profile?.store?.whatsapp || '', welcome: profile?.store?.welcome || '' }); setEditStore(true) }}
               variant="secondary" size="sm" className="mt-5">
               ✏️ Edit Store Info
             </Btn>
@@ -549,14 +595,14 @@ export default function MyStore() {
       {activeTab === 'settings' && (
         <Card className="p-6 space-y-5">
           <h3 className="font-bold text-gray-900">Store Settings</h3>
-          <Input label="Store Name *" value={editStoreForm.name ?? profile.store.name}
+          <Input label="Store Name *" value={editStoreForm.name ?? profile?.store?.name || ''}
             onChange={e => setEditStoreForm(p => ({ ...p, name: e.target.value }))} placeholder="Store name" />
-          <Input label="WhatsApp Number *" value={editStoreForm.whatsapp ?? profile.store.whatsapp}
+          <Input label="WhatsApp Number *" value={editStoreForm.whatsapp ?? profile?.store?.whatsapp || ''}
             onChange={e => setEditStoreForm(p => ({ ...p, whatsapp: e.target.value }))} placeholder="0XX XXX XXXX" icon="📱" />
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Welcome Message</label>
             <textarea
-              value={editStoreForm.welcome ?? profile.store.welcome ?? ''}
+              value={editStoreForm.welcome ?? profile?.store?.welcome ?? ''}
               onChange={e => setEditStoreForm(p => ({ ...p, welcome: e.target.value }))}
               placeholder="Welcome message for your storefront..."
               rows={3}
@@ -565,7 +611,7 @@ export default function MyStore() {
           </div>
           <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
             <p className="text-xs text-amber-700 font-medium">⚠️ Store slug cannot be changed after creation.</p>
-            <p className="text-xs text-amber-600 mt-0.5 font-mono">/store/{profile.store.slug}</p>
+            <p className="text-xs text-amber-600 mt-0.5 font-mono">/store/{profile?.store?.slug || 'N/A'}</p>
           </div>
           <Btn onClick={() => handleUpdateStore()} className="w-full" size="lg">Save Changes</Btn>
         </Card>
@@ -577,7 +623,7 @@ export default function MyStore() {
           <div className="space-y-4">
             <div className="bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-100 rounded-xl p-4">
               <p className="text-sm font-semibold text-emerald-800">Available Profit</p>
-              <p className="text-3xl font-black text-emerald-600 mt-1">{formatCurrency(profile.profit || 0)}</p>
+              <p className="text-3xl font-black text-emerald-600 mt-1">{formatCurrency(profile?.profit || 0)}</p>
               <p className="text-xs text-emerald-500 mt-1">Minimum withdrawal: ₵30</p>
             </div>
             <Input
@@ -585,7 +631,7 @@ export default function MyStore() {
               type="number"
               min="30"
               step="0.01"
-              max={profile.profit || 0}
+              max={profile?.profit || 0}
               value={wdAmount}
               onChange={e => setWdAmount(e.target.value)}
               placeholder="0.00"
