@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useAuthStore from '../store/authStore'
 import { supabase } from '../lib/supabase'
-import { Btn, Input } from '../components/ui'
 import toast from 'react-hot-toast'
 
 export default function Login() {
@@ -32,9 +31,10 @@ export default function Login() {
         navigate('/dashboard')
         toast.success(`Welcome back, ${profile.name || 'Admin'}!`)
       } else {
-        // Customer - redirect to their reseller's store or access denied
+        // Customer - redirect to storefront
+        // Check if customer has a reseller_id
         if (profile?.reseller_id) {
-          // Get the store slug for this reseller
+          // Get the store for this reseller
           const { data: store, error } = await supabase
             .from('stores')
             .select('slug')
@@ -42,15 +42,18 @@ export default function Login() {
             .single()
           
           if (store?.slug) {
+            // Redirect to the store's slug
             navigate(`/store/${store.slug}`)
             toast.success('Welcome to your reseller store!')
           } else {
-            navigate('/store/access-denied')
-            toast.error('Store not found')
+            // No store found for this reseller
+            toast.error('Store not found for your reseller.')
+            navigate('/')
           }
         } else {
-          navigate('/store/access-denied')
-          toast.error('Access denied. Contact your reseller.')
+          // Customer has no reseller assigned
+          toast.error('No reseller assigned to your account.')
+          navigate('/')
         }
       }
     } catch (e) {
