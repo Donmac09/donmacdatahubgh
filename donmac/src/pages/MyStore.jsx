@@ -25,40 +25,14 @@ export default function MyStore() {
   const [storeOrders, setStoreOrders] = useState([])
   const [storeStats, setStoreStats] = useState({ totalSales: 0, totalOrders: 0, totalProfit: 0 })
   const [loading, setLoading] = useState(true)
-  const [hasStore, setHasStore] = useState(false)
 
-  // Check if user has a store
+  // Use profile.store directly since auth store now includes it
+  const hasStore = !!profile?.store?.id
+
   useEffect(() => {
-    checkStoreStatus()
-  }, [profile?.id])
-
-  async function checkStoreStatus() {
-    setLoading(true)
-    try {
-      // Directly check if user has a store from the database
-      const { data, error } = await supabase
-        .from('stores')
-        .select('id, name, slug, whatsapp, welcome')
-        .eq('reseller_id', profile?.id)
-        .single()
-
-      if (data) {
-        // User has a store - update profile with store data
-        setHasStore(true)
-        // Update profile store data if not already there
-        if (!profile?.store) {
-          await refreshProfile()
-        }
-      } else {
-        setHasStore(false)
-      }
-    } catch (error) {
-      console.error('Error checking store:', error)
-      setHasStore(false)
-    } finally {
-      setLoading(false)
-    }
-  }
+    // Refresh profile to ensure store data is loaded
+    refreshProfile()
+  }, [])
 
   useEffect(() => {
     if (hasStore) {
@@ -66,8 +40,11 @@ export default function MyStore() {
       loadWithdrawals()
       loadStoreOrders()
       loadStoreStats()
+      setLoading(false)
+    } else {
+      setLoading(false)
     }
-  }, [hasStore, profile?.id])
+  }, [profile?.id, hasStore])
 
   async function loadPrices() {
     try {
@@ -154,9 +131,8 @@ export default function MyStore() {
         whatsapp: whatsapp.trim(),
         welcome: welcome.trim(),
       })
+      // Refresh profile to load the new store
       await refreshProfile()
-      // After creating store, check again
-      await checkStoreStatus()
       toast.success('🎉 Your store has been created!')
     } catch (e) {
       toast.error(e.message || 'Failed to create store')
@@ -170,15 +146,22 @@ export default function MyStore() {
     if (!name.trim()) { toast.error('Store name is required'); return }
     if (!whatsapp.trim()) { toast.error('WhatsApp number is required'); return }
     try {
-      await supabase.from('stores').update({ 
-        name: name.trim(), 
-        whatsapp: whatsapp.trim(), 
-        welcome: welcome.trim() 
-      }).eq('id', profile.store.id)
+      await supabase
+        .from('stores')
+        .update({ 
+          name: name.trim(), 
+          whatsapp: whatsapp.trim(), 
+          welcome: welcome.trim() 
+        })
+        .eq('id', profile.store.id)
+      
+      // Refresh profile to get updated store
       await refreshProfile()
       setEditStore(false)
       toast.success('Store updated!')
-    } catch (e) { toast.error(e.message) }
+    } catch (e) { 
+      toast.error(e.message || 'Failed to update store') 
+    }
   }
 
   async function handleSavePrices() {
@@ -211,7 +194,7 @@ export default function MyStore() {
     } catch (e) { toast.error(e.message) }
   }
 
-  const shareLink = hasStore ? `${window.location.origin}/store/${profile?.store?.slug || ''}` : ''
+  const shareLink = hasStore ? `${window.location.origin}/store/${profile.store.slug}` : ''
   const totalWithdrawn = withdrawals.filter(w => w.status === 'paid').reduce((s, w) => s + (w.amount || 0), 0)
   const pendingWithdrawals = withdrawals.filter(w => w.status === 'pending').reduce((s, w) => s + (w.amount || 0), 0)
 
@@ -360,9 +343,9 @@ export default function MyStore() {
               <span className="text-indigo-300 text-xs font-semibold uppercase tracking-widest">My Reseller Store</span>
               <span className="bg-green-500/20 text-green-300 text-[10px] font-bold px-2 py-0.5 rounded-full">● LIVE</span>
             </div>
-            <h2 className="text-2xl font-black">{profile?.store?.name || 'Your Store'}</h2>
-            <p className="text-indigo-300 text-sm mt-0.5">📱 {profile?.store?.whatsapp || 'N/A'}</p>
-            {profile?.store?.welcome && (
+            <h2 className="text-2xl font-black">{profile.store.name}</h2>
+            <p className="text-indigo-300 text-sm mt-0.5">📱 {profile.store.whatsapp}</p>
+            {profile.store.welcome && (
               <p className="text-slate-400 text-xs mt-2 max-w-md italic">"{profile.store.welcome}"</p>
             )}
           </div>
@@ -370,7 +353,7 @@ export default function MyStore() {
           {/* Profit Card */}
           <div className="bg-white/10 backdrop-blur-sm rounded-2xl px-6 py-4 text-center min-w-[160px] border border-white/10">
             <p className="text-indigo-200 text-xs font-semibold uppercase tracking-wider mb-1">Profit Balance</p>
-            <p className="text-4xl font-black text-white">{formatCurrency(profile?.profit || 0)}</p>
+            <p className="text-4xl font-black text-white">{formatCurrency(profile.profit || 0)}</p>
             <Btn
               onClick={() => setShowWdModal(true)}
               variant="warning"
@@ -402,7 +385,7 @@ export default function MyStore() {
       {/* Stats row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
-          { label: 'Total Profit', value: formatCurrency(profile?.profit || 0), color: 'text-emerald-600', bg: 'bg-emerald-50' },
+          { label: 'Total Profit', value: formatCurrency(profile.profit || 0), color: 'text-emerald-600', bg: 'bg-emerald-50' },
           { label: 'Total Sales', value: formatCurrency(storeStats.totalSales), color: 'text-blue-600', bg: 'bg-blue-50' },
           { label: 'Total Orders', value: storeStats.totalOrders, color: 'text-purple-600', bg: 'bg-purple-50' },
           { label: 'Pending Withdrawals', value: formatCurrency(pendingWithdrawals), color: 'text-amber-600', bg: 'bg-amber-50' },
@@ -435,10 +418,10 @@ export default function MyStore() {
             <h3 className="font-bold text-gray-900 mb-4">Store Information</h3>
             <div className="grid sm:grid-cols-2 gap-4">
               {[
-                { label: 'Store Name', value: profile?.store?.name || 'N/A' },
-                { label: 'Store Slug', value: `/${profile?.store?.slug || 'N/A'}` },
-                { label: 'WhatsApp', value: profile?.store?.whatsapp || 'N/A' },
-                { label: 'Welcome Message', value: profile?.store?.welcome || '(none set)' },
+                { label: 'Store Name', value: profile.store.name },
+                { label: 'Store Slug', value: `/${profile.store.slug}` },
+                { label: 'WhatsApp', value: profile.store.whatsapp },
+                { label: 'Welcome Message', value: profile.store.welcome || '(none set)' },
               ].map(f => (
                 <div key={f.label} className="bg-gray-50 rounded-xl p-4">
                   <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">{f.label}</p>
@@ -446,8 +429,19 @@ export default function MyStore() {
                 </div>
               ))}
             </div>
-            <Btn onClick={() => { setEditStoreForm({ name: profile?.store?.name || '', whatsapp: profile?.store?.whatsapp || '', welcome: profile?.store?.welcome || '' }); setEditStore(true) }}
-              variant="secondary" size="sm" className="mt-5">
+            <Btn 
+              onClick={() => { 
+                setEditStoreForm({ 
+                  name: profile.store.name, 
+                  whatsapp: profile.store.whatsapp, 
+                  welcome: profile.store.welcome || '' 
+                }); 
+                setEditStore(true) 
+              }}
+              variant="secondary" 
+              size="sm" 
+              className="mt-5"
+            >
               ✏️ Edit Store Info
             </Btn>
           </Card>
@@ -592,50 +586,95 @@ export default function MyStore() {
       )}
 
       {/* ── Settings Tab ── */}
-{activeTab === 'settings' && (
-  <Card className="p-6 space-y-5">
-    <h3 className="font-bold text-gray-900">Store Settings</h3>
-    <Input 
-      label="Store Name *" 
-      value={editStoreForm.name ?? profile?.store?.name ?? ''}
-      onChange={e => setEditStoreForm(p => ({ ...p, name: e.target.value }))} 
-      placeholder="Store name" 
-    />
-    <Input 
-      label="WhatsApp Number *" 
-      value={editStoreForm.whatsapp ?? profile?.store?.whatsapp ?? ''}
-      onChange={e => setEditStoreForm(p => ({ ...p, whatsapp: e.target.value }))} 
-      placeholder="0XX XXX XXXX" 
-      icon="📱" 
-    />
-    <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1.5">Welcome Message</label>
-      <textarea
-        value={editStoreForm.welcome ?? profile?.store?.welcome ?? ''}
-        onChange={e => setEditStoreForm(p => ({ ...p, welcome: e.target.value }))}
-        placeholder="Welcome message for your storefront..."
-        rows={3}
-        className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none transition"
-      />
-    </div>
-    <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
-      <p className="text-xs text-amber-700 font-medium">⚠️ Store slug cannot be changed after creation.</p>
-      <p className="text-xs text-amber-600 mt-0.5 font-mono">/store/{profile?.store?.slug || 'N/A'}</p>
-    </div>
-    <Btn onClick={() => handleUpdateStore()} className="w-full" size="lg">Save Changes</Btn>
-  </Card>
-)}
+      {activeTab === 'settings' && (
+        <Card className="p-6 space-y-5">
+          <h3 className="font-bold text-gray-900">Store Settings</h3>
+          <Input 
+            label="Store Name *" 
+            value={editStoreForm.name ?? profile.store.name ?? ''}
+            onChange={e => setEditStoreForm(p => ({ ...p, name: e.target.value }))} 
+            placeholder="Store name" 
+          />
+          <Input 
+            label="WhatsApp Number *" 
+            value={editStoreForm.whatsapp ?? profile.store.whatsapp ?? ''}
+            onChange={e => setEditStoreForm(p => ({ ...p, whatsapp: e.target.value }))} 
+            placeholder="0XX XXX XXXX" 
+            icon="📱" 
+          />
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Welcome Message</label>
+            <textarea
+              value={editStoreForm.welcome ?? profile.store.welcome ?? ''}
+              onChange={e => setEditStoreForm(p => ({ ...p, welcome: e.target.value }))}
+              placeholder="Welcome message for your storefront..."
+              rows={3}
+              className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none transition"
+            />
+          </div>
+          <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
+            <p className="text-xs text-amber-700 font-medium">⚠️ Store slug cannot be changed after creation.</p>
+            <p className="text-xs text-amber-600 mt-0.5 font-mono">/store/{profile.store.slug}</p>
+          </div>
+          <Btn onClick={() => handleUpdateStore()} className="w-full" size="lg">Save Changes</Btn>
+        </Card>
+      )}
+
+      {/* Withdraw Modal */}
+      {showWdModal && (
+        <Modal title="💸 Request Withdrawal" onClose={() => setShowWdModal(false)} size="sm">
+          <div className="space-y-4">
+            <div className="bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-100 rounded-xl p-4">
+              <p className="text-sm font-semibold text-emerald-800">Available Profit</p>
+              <p className="text-3xl font-black text-emerald-600 mt-1">{formatCurrency(profile.profit || 0)}</p>
+              <p className="text-xs text-emerald-500 mt-1">Minimum withdrawal: ₵30</p>
+            </div>
+            <Input
+              label="Amount to Withdraw (₵)"
+              type="number"
+              min="30"
+              step="0.01"
+              max={profile.profit || 0}
+              value={wdAmount}
+              onChange={e => setWdAmount(e.target.value)}
+              placeholder="0.00"
+              icon="₵"
+            />
+            {wdAmount && parseFloat(wdAmount) >= 30 && (
+              <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-xs text-blue-700">
+                Admin will process your withdrawal within 24 hours.
+              </div>
+            )}
+            <Btn onClick={handleWithdraw} className="w-full" size="lg" variant="success">Submit Request</Btn>
+          </div>
+        </Modal>
+      )}
 
       {/* Edit Store Modal */}
       {editStore && (
         <Modal title="✏️ Edit Store" onClose={() => setEditStore(false)} size="sm">
           <div className="space-y-4">
-            <Input label="Store Name *" value={editStoreForm.name || ''} onChange={e => setEditStoreForm(p => ({ ...p, name: e.target.value }))} placeholder="Store name" />
-            <Input label="WhatsApp Number *" value={editStoreForm.whatsapp || ''} onChange={e => setEditStoreForm(p => ({ ...p, whatsapp: e.target.value }))} placeholder="0XX XXX XXXX" icon="📱" />
+            <Input 
+              label="Store Name *" 
+              value={editStoreForm.name || ''} 
+              onChange={e => setEditStoreForm(p => ({ ...p, name: e.target.value }))} 
+              placeholder="Store name" 
+            />
+            <Input 
+              label="WhatsApp Number *" 
+              value={editStoreForm.whatsapp || ''} 
+              onChange={e => setEditStoreForm(p => ({ ...p, whatsapp: e.target.value }))} 
+              placeholder="0XX XXX XXXX" 
+              icon="📱" 
+            />
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Welcome Message</label>
-              <textarea value={editStoreForm.welcome || ''} onChange={e => setEditStoreForm(p => ({ ...p, welcome: e.target.value }))} rows={3}
-                className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" />
+              <textarea 
+                value={editStoreForm.welcome || ''} 
+                onChange={e => setEditStoreForm(p => ({ ...p, welcome: e.target.value }))} 
+                rows={3}
+                className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" 
+              />
             </div>
             <Btn onClick={handleUpdateStore} className="w-full" size="lg">Save Changes</Btn>
           </div>
