@@ -25,28 +25,75 @@ export default function MyStore() {
   const [storeOrders, setStoreOrders] = useState([])
   const [storeStats, setStoreStats] = useState({ totalSales: 0, totalOrders: 0, totalProfit: 0 })
   const [loading, setLoading] = useState(true)
+  const [storeData, setStoreData] = useState(null)
+  const [hasStore, setHasStore] = useState(false)
 
-  // Check if user has a store - directly from profile
-  const hasStore = !!profile?.store?.id
-
-  // Force refresh profile on mount to ensure store data is loaded
+  // FIX: Check for store when component mounts AND when profile changes
   useEffect(() => {
-    const loadProfile = async () => {
-      await refreshProfile()
+    // Only run if we have a profile
+    if (profile?.id) {
+      checkStore()
+    } else {
+      // If no profile, wait for it
+      const unsubscribe = useAuthStore.subscribe((state) => {
+        if (state.profile?.id) {
+          checkStore()
+        }
+      })
+      return () => unsubscribe?.()
+    }
+  }, [profile?.id])
+
+  async function checkStore() {
+    if (!profile?.id) {
+      setLoading(false)
+      return
+    }
+    
+    setLoading(true)
+    try {
+      console.log('🔍 Checking store for user:', profile.id)
+      
+      // Check if store exists in the stores table
+      const { data: store, error } = await supabase
+        .from('stores')
+        .select('*')
+        .eq('reseller_id', profile.id)
+        .maybeSingle()
+      
+      console.log('Store data:', store, 'Error:', error)
+      
+      if (store) {
+        setStoreData(store)
+        setHasStore(true)
+        console.log('✅ Store found:', store.name)
+        
+        // Load all data
+        await Promise.all([
+          loadPrices(),
+          loadWithdrawals(),
+          loadStoreOrders(),
+          loadStoreStats()
+        ])
+      } else {
+        setStoreData(null)
+        setHasStore(false)
+        console.log('❌ No store found for user:', profile.id)
+        
+        // Check if there are any stores at all
+        const { data: allStores, error: allError } = await supabase
+          .from('stores')
+          .select('count')
+        console.log('Total stores in DB:', allStores)
+      }
+    } catch (error) {
+      console.error('Error checking store:', error)
+      setHasStore(false)
+      setStoreData(null)
+    } finally {
       setLoading(false)
     }
-    loadProfile()
-  }, [])
-
-  // Load data when profile is ready and has store
-  useEffect(() => {
-    if (hasStore && profile?.id) {
-      loadPrices()
-      loadWithdrawals()
-      loadStoreOrders()
-      loadStoreStats()
-    }
-  }, [profile?.id, hasStore])
+  }
 
   async function loadPrices() {
     try {
@@ -55,7 +102,7 @@ export default function MyStore() {
       data.forEach(p => { map[p.package_key] = parseFloat(p.price) })
       setSavedPrices(map)
       setPrices(map)
-    } catch (e) { console.error(e) }
+    } catch (e) { console.error('Error loading prices:', e) }
   }
 
   async function loadWithdrawals() {
@@ -66,7 +113,7 @@ export default function MyStore() {
         .eq('reseller_id', profile.id)
         .order('created_at', { ascending: false })
       setWithdrawals(data || [])
-    } catch (e) { console.error(e) }
+    } catch (e) { console.error('Error loading withdrawals:', e) }
   }
 
   async function loadStoreOrders() {
@@ -78,7 +125,7 @@ export default function MyStore() {
         .order('created_at', { ascending: false })
         .limit(20)
       setStoreOrders(data || [])
-    } catch (e) { console.error(e) }
+    } catch (e) { console.error('Error loading orders:', e) }
   }
 
   async function loadStoreStats() {
@@ -98,7 +145,7 @@ export default function MyStore() {
           totalProfit
         })
       }
-    } catch (e) { console.error(e) }
+    } catch (e) { console.error('Error loading stats:', e) }
   }
 
   function validateSlug(val) {
@@ -107,7 +154,7 @@ export default function MyStore() {
   }
 
   async function checkSlugAvailable(slug) {
-    const { data } = await supabase.from('stores').select('id').eq('slug', slug).single()
+    const { data } = await supabase.from('stores').select('id').eq('slug', slug).maybeSingle()
     return !data
   }
 
@@ -126,17 +173,29 @@ export default function MyStore() {
         setSavingStore(false)
         return
       }
-      await createStore({
-        reseller_id: profile.id,
-        name: name.trim(),
-        slug: slug.trim(),
-        whatsapp: whatsapp.trim(),
-        welcome: welcome.trim(),
-      })
-      // Force refresh profile to load the new store
+      
+      const { data: newStore, error } = await supabase
+        .from('stores')
+        .insert({
+          reseller_id: profile.id,
+          name: name.trim(),
+          slug: slug.trim(),
+          whatsapp: whatsapp.trim(),
+          welcome: welcome.trim(),
+        })
+        .select()
+        .single()
+      
+      if (error) throw error
+      
+      setStoreData(newStore)
+      setHasStore(true)
+      
       await refreshProfile()
+      
       toast.success('🎉 Your store has been created!')
     } catch (e) {
+      console.error('Create store error:', e)
       toast.error(e.message || 'Failed to create store')
     } finally {
       setSavingStore(false)
@@ -147,21 +206,27 @@ export default function MyStore() {
     const { name, whatsapp, welcome } = editStoreForm
     if (!name.trim()) { toast.error('Store name is required'); return }
     if (!whatsapp.trim()) { toast.error('WhatsApp number is required'); return }
+    
     try {
-      await supabase
+      const { data: updatedStore, error } = await supabase
         .from('stores')
         .update({ 
           name: name.trim(), 
           whatsapp: whatsapp.trim(), 
           welcome: welcome.trim() 
         })
-        .eq('id', profile.store.id)
+        .eq('id', storeData.id)
+        .select()
+        .single()
       
-      // Force refresh profile to get updated store
+      if (error) throw error
+      
+      setStoreData(updatedStore)
       await refreshProfile()
       setEditStore(false)
       toast.success('Store updated!')
     } catch (e) { 
+      console.error('Update store error:', e)
       toast.error(e.message || 'Failed to update store') 
     }
   }
@@ -173,7 +238,12 @@ export default function MyStore() {
       setSavedPrices({ ...prices })
       setEditPrices(false)
       toast.success('Prices saved!')
-    } catch (e) { toast.error(e.message) } finally { setSavingPrices(false) }
+    } catch (e) { 
+      console.error('Save prices error:', e)
+      toast.error(e.message) 
+    } finally { 
+      setSavingPrices(false) 
+    }
   }
 
   async function handleWithdraw() {
@@ -191,12 +261,15 @@ export default function MyStore() {
       toast.success('Withdrawal request submitted!')
       setShowWdModal(false)
       setWdAmount('')
-      loadWithdrawals()
+      await loadWithdrawals()
       await refreshProfile()
-    } catch (e) { toast.error(e.message) }
+    } catch (e) { 
+      console.error('Withdraw error:', e)
+      toast.error(e.message) 
+    }
   }
 
-  const shareLink = hasStore ? `${window.location.origin}/store/${profile.store.slug}` : ''
+  const shareLink = hasStore && storeData ? `${window.location.origin}/store/${storeData.slug}` : ''
   const totalWithdrawn = withdrawals.filter(w => w.status === 'paid').reduce((s, w) => s + (w.amount || 0), 0)
   const pendingWithdrawals = withdrawals.filter(w => w.status === 'pending').reduce((s, w) => s + (w.amount || 0), 0)
 
@@ -213,7 +286,7 @@ export default function MyStore() {
   }
 
   // ── CREATE STORE SCREEN ──────────────────────────────────────
-  if (!hasStore) {
+  if (!hasStore || !storeData) {
     return (
       <div className="animate-fade-in max-w-xl mx-auto">
         <div className="text-center mb-8">
@@ -345,10 +418,10 @@ export default function MyStore() {
               <span className="text-indigo-300 text-xs font-semibold uppercase tracking-widest">My Reseller Store</span>
               <span className="bg-green-500/20 text-green-300 text-[10px] font-bold px-2 py-0.5 rounded-full">● LIVE</span>
             </div>
-            <h2 className="text-2xl font-black">{profile.store?.name || 'Your Store'}</h2>
-            <p className="text-indigo-300 text-sm mt-0.5">📱 {profile.store?.whatsapp || 'N/A'}</p>
-            {profile.store?.welcome && (
-              <p className="text-slate-400 text-xs mt-2 max-w-md italic">"{profile.store.welcome}"</p>
+            <h2 className="text-2xl font-black">{storeData.name}</h2>
+            <p className="text-indigo-300 text-sm mt-0.5">📱 {storeData.whatsapp}</p>
+            {storeData.welcome && (
+              <p className="text-slate-400 text-xs mt-2 max-w-md italic">"{storeData.welcome}"</p>
             )}
           </div>
 
@@ -420,10 +493,10 @@ export default function MyStore() {
             <h3 className="font-bold text-gray-900 mb-4">Store Information</h3>
             <div className="grid sm:grid-cols-2 gap-4">
               {[
-                { label: 'Store Name', value: profile.store?.name || 'N/A' },
-                { label: 'Store Slug', value: `/${profile.store?.slug || 'N/A'}` },
-                { label: 'WhatsApp', value: profile.store?.whatsapp || 'N/A' },
-                { label: 'Welcome Message', value: profile.store?.welcome || '(none set)' },
+                { label: 'Store Name', value: storeData.name },
+                { label: 'Store Slug', value: `/${storeData.slug}` },
+                { label: 'WhatsApp', value: storeData.whatsapp },
+                { label: 'Welcome Message', value: storeData.welcome || '(none set)' },
               ].map(f => (
                 <div key={f.label} className="bg-gray-50 rounded-xl p-4">
                   <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">{f.label}</p>
@@ -434,9 +507,9 @@ export default function MyStore() {
             <Btn 
               onClick={() => { 
                 setEditStoreForm({ 
-                  name: profile.store?.name || '', 
-                  whatsapp: profile.store?.whatsapp || '', 
-                  welcome: profile.store?.welcome || '' 
+                  name: storeData.name, 
+                  whatsapp: storeData.whatsapp, 
+                  welcome: storeData.welcome || '' 
                 }); 
                 setEditStore(true) 
               }}
@@ -593,13 +666,13 @@ export default function MyStore() {
           <h3 className="font-bold text-gray-900">Store Settings</h3>
           <Input 
             label="Store Name *" 
-            value={editStoreForm.name ?? profile.store?.name ?? ''}
+            value={editStoreForm.name ?? storeData.name ?? ''}
             onChange={e => setEditStoreForm(p => ({ ...p, name: e.target.value }))} 
             placeholder="Store name" 
           />
           <Input 
             label="WhatsApp Number *" 
-            value={editStoreForm.whatsapp ?? profile.store?.whatsapp ?? ''}
+            value={editStoreForm.whatsapp ?? storeData.whatsapp ?? ''}
             onChange={e => setEditStoreForm(p => ({ ...p, whatsapp: e.target.value }))} 
             placeholder="0XX XXX XXXX" 
             icon="📱" 
@@ -607,7 +680,7 @@ export default function MyStore() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Welcome Message</label>
             <textarea
-              value={editStoreForm.welcome ?? profile.store?.welcome ?? ''}
+              value={editStoreForm.welcome ?? storeData.welcome ?? ''}
               onChange={e => setEditStoreForm(p => ({ ...p, welcome: e.target.value }))}
               placeholder="Welcome message for your storefront..."
               rows={3}
@@ -616,7 +689,7 @@ export default function MyStore() {
           </div>
           <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
             <p className="text-xs text-amber-700 font-medium">⚠️ Store slug cannot be changed after creation.</p>
-            <p className="text-xs text-amber-600 mt-0.5 font-mono">/store/{profile.store?.slug || 'N/A'}</p>
+            <p className="text-xs text-amber-600 mt-0.5 font-mono">/store/{storeData.slug}</p>
           </div>
           <Btn onClick={() => handleUpdateStore()} className="w-full" size="lg">Save Changes</Btn>
         </Card>
