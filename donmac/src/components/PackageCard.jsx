@@ -7,7 +7,7 @@ const NETWORK_BRANDING = {
   mtn: {
     logo: 'https://tse3.mm.bing.net/th/id/OIP.twD5QvZjX6mFxVPBlIcQqAHaE_?rs=1&pid=ImgDetMain&o=7&rm=3', // Replace with your local asset path (e.g., /images/mtn-logo.png)
     fallbackChar: 'M',
-    brandColor: '#B38F00'
+    brandColor: '#FFCC08'
   },
   telecel: {
     logo: 'https://tse2.mm.bing.net/th/id/OIP._V9CkKDi23oI4p9VRjvu9wHaHa?rs=1&pid=ImgDetMain&o=7&rm=3', // Replace with your local asset path
