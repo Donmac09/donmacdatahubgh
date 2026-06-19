@@ -1,15 +1,8 @@
 import { create } from 'zustand'
 
 const useCartStore = create((set, get) => ({
-  // Cart Sub-State
   items: [],
   open: false,
-
-  // Reseller Custom Store Workspace Configuration State
-  storeConfig: null, 
-
-  // Action to map dynamic URL structures into state memory
-  setStoreConfig: (config) => set({ storeConfig: config }),
 
   addItem: (item) => {
     set(s => ({ items: [...s.items, { ...item, cartId: Date.now() + Math.random() }] }))
