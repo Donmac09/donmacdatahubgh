@@ -26,23 +26,25 @@ export default function MyStore() {
   const [storeStats, setStoreStats] = useState({ totalSales: 0, totalOrders: 0, totalProfit: 0 })
   const [loading, setLoading] = useState(true)
 
-  // Use profile.store directly since auth store now includes it
+  // Check if user has a store - directly from profile
   const hasStore = !!profile?.store?.id
 
+  // Force refresh profile on mount to ensure store data is loaded
   useEffect(() => {
-    // Refresh profile to ensure store data is loaded
-    refreshProfile()
+    const loadProfile = async () => {
+      await refreshProfile()
+      setLoading(false)
+    }
+    loadProfile()
   }, [])
 
+  // Load data when profile is ready and has store
   useEffect(() => {
-    if (hasStore) {
+    if (hasStore && profile?.id) {
       loadPrices()
       loadWithdrawals()
       loadStoreOrders()
       loadStoreStats()
-      setLoading(false)
-    } else {
-      setLoading(false)
     }
   }, [profile?.id, hasStore])
 
@@ -131,7 +133,7 @@ export default function MyStore() {
         whatsapp: whatsapp.trim(),
         welcome: welcome.trim(),
       })
-      // Refresh profile to load the new store
+      // Force refresh profile to load the new store
       await refreshProfile()
       toast.success('🎉 Your store has been created!')
     } catch (e) {
@@ -155,7 +157,7 @@ export default function MyStore() {
         })
         .eq('id', profile.store.id)
       
-      // Refresh profile to get updated store
+      // Force refresh profile to get updated store
       await refreshProfile()
       setEditStore(false)
       toast.success('Store updated!')
@@ -343,9 +345,9 @@ export default function MyStore() {
               <span className="text-indigo-300 text-xs font-semibold uppercase tracking-widest">My Reseller Store</span>
               <span className="bg-green-500/20 text-green-300 text-[10px] font-bold px-2 py-0.5 rounded-full">● LIVE</span>
             </div>
-            <h2 className="text-2xl font-black">{profile.store.name}</h2>
-            <p className="text-indigo-300 text-sm mt-0.5">📱 {profile.store.whatsapp}</p>
-            {profile.store.welcome && (
+            <h2 className="text-2xl font-black">{profile.store?.name || 'Your Store'}</h2>
+            <p className="text-indigo-300 text-sm mt-0.5">📱 {profile.store?.whatsapp || 'N/A'}</p>
+            {profile.store?.welcome && (
               <p className="text-slate-400 text-xs mt-2 max-w-md italic">"{profile.store.welcome}"</p>
             )}
           </div>
@@ -418,10 +420,10 @@ export default function MyStore() {
             <h3 className="font-bold text-gray-900 mb-4">Store Information</h3>
             <div className="grid sm:grid-cols-2 gap-4">
               {[
-                { label: 'Store Name', value: profile.store.name },
-                { label: 'Store Slug', value: `/${profile.store.slug}` },
-                { label: 'WhatsApp', value: profile.store.whatsapp },
-                { label: 'Welcome Message', value: profile.store.welcome || '(none set)' },
+                { label: 'Store Name', value: profile.store?.name || 'N/A' },
+                { label: 'Store Slug', value: `/${profile.store?.slug || 'N/A'}` },
+                { label: 'WhatsApp', value: profile.store?.whatsapp || 'N/A' },
+                { label: 'Welcome Message', value: profile.store?.welcome || '(none set)' },
               ].map(f => (
                 <div key={f.label} className="bg-gray-50 rounded-xl p-4">
                   <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">{f.label}</p>
@@ -432,9 +434,9 @@ export default function MyStore() {
             <Btn 
               onClick={() => { 
                 setEditStoreForm({ 
-                  name: profile.store.name, 
-                  whatsapp: profile.store.whatsapp, 
-                  welcome: profile.store.welcome || '' 
+                  name: profile.store?.name || '', 
+                  whatsapp: profile.store?.whatsapp || '', 
+                  welcome: profile.store?.welcome || '' 
                 }); 
                 setEditStore(true) 
               }}
@@ -591,13 +593,13 @@ export default function MyStore() {
           <h3 className="font-bold text-gray-900">Store Settings</h3>
           <Input 
             label="Store Name *" 
-            value={editStoreForm.name ?? profile.store.name ?? ''}
+            value={editStoreForm.name ?? profile.store?.name ?? ''}
             onChange={e => setEditStoreForm(p => ({ ...p, name: e.target.value }))} 
             placeholder="Store name" 
           />
           <Input 
             label="WhatsApp Number *" 
-            value={editStoreForm.whatsapp ?? profile.store.whatsapp ?? ''}
+            value={editStoreForm.whatsapp ?? profile.store?.whatsapp ?? ''}
             onChange={e => setEditStoreForm(p => ({ ...p, whatsapp: e.target.value }))} 
             placeholder="0XX XXX XXXX" 
             icon="📱" 
@@ -605,7 +607,7 @@ export default function MyStore() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Welcome Message</label>
             <textarea
-              value={editStoreForm.welcome ?? profile.store.welcome ?? ''}
+              value={editStoreForm.welcome ?? profile.store?.welcome ?? ''}
               onChange={e => setEditStoreForm(p => ({ ...p, welcome: e.target.value }))}
               placeholder="Welcome message for your storefront..."
               rows={3}
@@ -614,7 +616,7 @@ export default function MyStore() {
           </div>
           <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
             <p className="text-xs text-amber-700 font-medium">⚠️ Store slug cannot be changed after creation.</p>
-            <p className="text-xs text-amber-600 mt-0.5 font-mono">/store/{profile.store.slug}</p>
+            <p className="text-xs text-amber-600 mt-0.5 font-mono">/store/{profile.store?.slug || 'N/A'}</p>
           </div>
           <Btn onClick={() => handleUpdateStore()} className="w-full" size="lg">Save Changes</Btn>
         </Card>
