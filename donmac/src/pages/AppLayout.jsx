@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import Sidebar from '../components/Sidebar'
 import Topbar from '../components/Topbar'
 import CartDrawer from '../components/CartDrawer'
@@ -13,10 +14,26 @@ import Profile from './Profile'
 import AdminPanel from './admin/AdminPanel'
 
 export default function AppLayout() {
+  const navigate = useNavigate()
   const [page, setPage] = useState('dashboard')
   const [collapsed, setCollapsed] = useState(false)
   const { open: cartOpen } = useCartStore()
-  const { isAdmin } = useAuthStore()
+  const { isAdmin, loading, canAccessDashboard, profile } = useAuthStore()
+
+  // Check access - redirect customers away from dashboard
+  useEffect(() => {
+    if (!loading) {
+      if (!canAccessDashboard()) {
+        // Customer - redirect to storefront or access denied
+        if (profile?.reseller_id) {
+          // If they belong to a reseller, redirect to that store
+          navigate('/store/access-denied')
+        } else {
+          navigate('/store/access-denied')
+        }
+      }
+    }
+  }, [loading, profile, navigate])
 
   // Responsive: collapse sidebar on mobile by default
   useEffect(() => {
@@ -25,6 +42,23 @@ export default function AppLayout() {
     window.addEventListener('resize', check)
     return () => window.removeEventListener('resize', check)
   }, [])
+
+  // Show loading while checking access
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <p className="mt-4 text-gray-500">Loading...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // If customer, don't render (will be redirected by useEffect)
+  if (!canAccessDashboard()) {
+    return null
+  }
 
   const leftPad = collapsed ? 'ml-16' : 'ml-60'
 
