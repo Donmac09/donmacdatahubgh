@@ -75,6 +75,18 @@ const useAuthStore = create((set, get) => ({
 
   isAdmin: () => get().profile?.email === 'donmacdatahub@gmail.com' || get().profile?.role === 'admin',
   isReseller: () => ['reseller', 'admin'].includes(get().profile?.role),
+  
+  // NEW: Check if user is a customer
+  isCustomer: () => {
+    const profile = get().profile
+    return profile?.role === 'customer' || (!profile?.role && !profile?.is_reseller)
+  },
+  
+  // NEW: Check if user can access admin/reseller dashboard
+  canAccessDashboard: () => {
+    const profile = get().profile
+    return ['admin', 'reseller'].includes(profile?.role)
+  }
 }))
 
 export default useAuthStore
