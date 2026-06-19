@@ -592,60 +592,39 @@ export default function MyStore() {
       )}
 
       {/* ── Settings Tab ── */}
-      {activeTab === 'settings' && (
-        <Card className="p-6 space-y-5">
-          <h3 className="font-bold text-gray-900">Store Settings</h3>
-          <Input label="Store Name *" value={editStoreForm.name ?? profile?.store?.name || ''}
-            onChange={e => setEditStoreForm(p => ({ ...p, name: e.target.value }))} placeholder="Store name" />
-          <Input label="WhatsApp Number *" value={editStoreForm.whatsapp ?? profile?.store?.whatsapp || ''}
-            onChange={e => setEditStoreForm(p => ({ ...p, whatsapp: e.target.value }))} placeholder="0XX XXX XXXX" icon="📱" />
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Welcome Message</label>
-            <textarea
-              value={editStoreForm.welcome ?? profile?.store?.welcome ?? ''}
-              onChange={e => setEditStoreForm(p => ({ ...p, welcome: e.target.value }))}
-              placeholder="Welcome message for your storefront..."
-              rows={3}
-              className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none transition"
-            />
-          </div>
-          <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
-            <p className="text-xs text-amber-700 font-medium">⚠️ Store slug cannot be changed after creation.</p>
-            <p className="text-xs text-amber-600 mt-0.5 font-mono">/store/{profile?.store?.slug || 'N/A'}</p>
-          </div>
-          <Btn onClick={() => handleUpdateStore()} className="w-full" size="lg">Save Changes</Btn>
-        </Card>
-      )}
-
-      {/* Withdraw Modal */}
-      {showWdModal && (
-        <Modal title="💸 Request Withdrawal" onClose={() => setShowWdModal(false)} size="sm">
-          <div className="space-y-4">
-            <div className="bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-100 rounded-xl p-4">
-              <p className="text-sm font-semibold text-emerald-800">Available Profit</p>
-              <p className="text-3xl font-black text-emerald-600 mt-1">{formatCurrency(profile?.profit || 0)}</p>
-              <p className="text-xs text-emerald-500 mt-1">Minimum withdrawal: ₵30</p>
-            </div>
-            <Input
-              label="Amount to Withdraw (₵)"
-              type="number"
-              min="30"
-              step="0.01"
-              max={profile?.profit || 0}
-              value={wdAmount}
-              onChange={e => setWdAmount(e.target.value)}
-              placeholder="0.00"
-              icon="₵"
-            />
-            {wdAmount && parseFloat(wdAmount) >= 30 && (
-              <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-xs text-blue-700">
-                Admin will process your withdrawal within 24 hours.
-              </div>
-            )}
-            <Btn onClick={handleWithdraw} className="w-full" size="lg" variant="success">Submit Request</Btn>
-          </div>
-        </Modal>
-      )}
+{activeTab === 'settings' && (
+  <Card className="p-6 space-y-5">
+    <h3 className="font-bold text-gray-900">Store Settings</h3>
+    <Input 
+      label="Store Name *" 
+      value={editStoreForm.name ?? profile?.store?.name ?? ''}
+      onChange={e => setEditStoreForm(p => ({ ...p, name: e.target.value }))} 
+      placeholder="Store name" 
+    />
+    <Input 
+      label="WhatsApp Number *" 
+      value={editStoreForm.whatsapp ?? profile?.store?.whatsapp ?? ''}
+      onChange={e => setEditStoreForm(p => ({ ...p, whatsapp: e.target.value }))} 
+      placeholder="0XX XXX XXXX" 
+      icon="📱" 
+    />
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1.5">Welcome Message</label>
+      <textarea
+        value={editStoreForm.welcome ?? profile?.store?.welcome ?? ''}
+        onChange={e => setEditStoreForm(p => ({ ...p, welcome: e.target.value }))}
+        placeholder="Welcome message for your storefront..."
+        rows={3}
+        className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none transition"
+      />
+    </div>
+    <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
+      <p className="text-xs text-amber-700 font-medium">⚠️ Store slug cannot be changed after creation.</p>
+      <p className="text-xs text-amber-600 mt-0.5 font-mono">/store/{profile?.store?.slug || 'N/A'}</p>
+    </div>
+    <Btn onClick={() => handleUpdateStore()} className="w-full" size="lg">Save Changes</Btn>
+  </Card>
+)}
 
       {/* Edit Store Modal */}
       {editStore && (
