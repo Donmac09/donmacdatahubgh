@@ -36,10 +36,13 @@ export default function Sidebar({ page, setPage, collapsed, setCollapsed }) {
       <aside className={cls(
         'fixed left-0 top-0 h-screen z-30 flex flex-col transition-all duration-300 ease-in-out',
         'bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 border-r border-white/5',
-        // Mobile: slide in/out, Desktop: collapse width
+        // Mobile: slide in/out based on collapsed state
         collapsed 
-          ? '-translate-x-full md:translate-x-0 md:w-16' 
-          : 'translate-x-0 md:w-60'
+          ? '-translate-x-full' 
+          : 'translate-x-0',
+        // Desktop: always visible, just change width
+        'md:translate-x-0',
+        collapsed ? 'md:w-16' : 'md:w-60'
       )}>
         {/* Logo with hamburger toggle */}
         <div className="flex items-center gap-3 px-4 py-5 border-b border-white/10 min-h-[68px]">
