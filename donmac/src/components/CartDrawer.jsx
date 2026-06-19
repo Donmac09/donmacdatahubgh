@@ -28,8 +28,13 @@ export default function CartDrawer({ onOrderPlaced }) {
       for (const item of items) {
         const ref = generateRef()
         const group = PACKAGES[item.groupKey]
+        
+        // Determine if this is a manual package (MTN Mashup)
+        const isManual = item.ghdata_type === 'mtn-ishare' || 
+                        item.id?.startsWith('mm') || 
+                        item.id?.startsWith('mmm')
 
-        // Insert order
+        // Insert order with all fields
         const { data: order, error: orderErr } = await supabase.from('orders').insert({
           ref,
           user_id: profile.id,
@@ -40,7 +45,15 @@ export default function CartDrawer({ onOrderPlaced }) {
           phone: item.phone,
           amount: item.price,
           cost_price: item.costPrice || item.price,
+          profit: (item.price - (item.costPrice || item.price)),
           status: 'pending',
+          ghdata_type: group?.ghdata_type || null, // ADD THIS
+          is_manual: isManual, // ADD THIS - flags MTN Mashup for manual delivery
+          item_data: {
+            data: item.data,
+            groupKey: item.groupKey,
+            network: group?.network
+          }
         }).select().single()
         if (orderErr) throw orderErr
 
@@ -68,10 +81,23 @@ export default function CartDrawer({ onOrderPlaced }) {
           type: 'order',
         })
 
-        // Place on GHData
-        try {
-          await placeGHDataOrder({ network: group?.ghdata_type || 'mtn', phone: item.phone, dataAmount: item.data })
-        } catch {}
+        // ONLY send to GHData if NOT a manual package
+        if (!isManual && group?.ghdata_type && group.ghdata_type !== 'mtn-ishare') {
+          try {
+            await placeGHDataOrder({ 
+              network: group.ghdata_type, 
+              phone: item.phone, 
+              dataAmount: item.data 
+            })
+          } catch (ghError) {
+            console.error('GHData delivery failed:', ghError)
+            // Don't throw - order is already created
+            // Admin will need to process manually
+          }
+        } else {
+          // Log that this is a manual order
+          console.log(`📝 Manual order created: ${ref} - ${group?.network} ${item.data}`)
+        }
       }
 
       await refreshProfile()
@@ -112,11 +138,21 @@ export default function CartDrawer({ onOrderPlaced }) {
             </div>
           ) : items.map(item => {
             const group = PACKAGES[item.groupKey]
+            const isManual = item.ghdata_type === 'mtn-ishare' || 
+                            item.id?.startsWith('mm') || 
+                            item.id?.startsWith('mmm')
             return (
               <div key={item.cartId} className="bg-gray-50 rounded-xl p-4 border border-gray-100">
                 <div className="flex justify-between items-start">
                   <div>
-                    <p className="font-semibold text-gray-900 text-sm">{item.data}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="font-semibold text-gray-900 text-sm">{item.data}</p>
+                      {isManual && (
+                        <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                          Manual
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-gray-500 mt-0.5">{group?.label}</p>
                     <p className="text-xs text-gray-500">📞 {item.phone}</p>
                     <p className="text-xs text-gray-400 mt-0.5">Validity: {group?.validity}</p>
