@@ -659,7 +659,7 @@ export default function MyStore() {
                   <tr key={w.id} className="hover:bg-gray-50 transition">
                     <Td className="text-xs text-gray-400">{formatDate(w.created_at)}</Td>
                     <Td><span className="font-bold text-gray-900">{formatCurrency(w.amount)}</span></Td>
-                    <Td><StatusBadge status={w.status} /></td>
+                    <Td><StatusBadge status={w.status} /></Td>
                     <Td className="text-xs text-gray-400">{w.reference || '—'}</Td>
                   </tr>
                 ))}
