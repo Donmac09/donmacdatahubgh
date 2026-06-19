@@ -6,23 +6,21 @@ const supabase = createClient(
 )
 
 export default async function handler(req, res) {
-  // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type')
   
-  // Handle preflight
   if (req.method === 'OPTIONS') {
     return res.status(200).end()
   }
 
-  // GET request - Fetch balance (existing functionality)
+  // GET request - Fetch balance
   if (req.method === 'GET') {
     try {
       const token = (req.headers.authorization || '').replace('Bearer ', '').trim()
       const { data: profile, error } = await supabase
         .from('profiles')
-        .select('balance, name')
+        .select('balance, name, role')
         .eq('api_token', token)
         .single()
       
@@ -32,20 +30,19 @@ export default async function handler(req, res) {
       
       return res.status(200).json({ 
         balance: profile.balance, 
-        name: profile.name 
+        name: profile.name,
+        role: profile.role
       })
     } catch (err) {
       return res.status(500).json({ error: err.message })
     }
   }
 
-  // POST request - Credit/Debit operations (NEW functionality)
+  // POST request
   if (req.method === 'POST') {
     try {
-      // Verify admin using API token
       const token = (req.headers.authorization || '').replace('Bearer ', '').trim()
       
-      // Check if the requester is an admin
       const { data: admin, error: adminError } = await supabase
         .from('profiles')
         .select('role')
@@ -56,74 +53,90 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: 'Admin access required' })
       }
 
-      // Get action details
       const { action, userId, amount } = req.body
       
-      // Validate required fields
-      if (!userId || !action) {
-        return res.status(400).json({ error: 'Missing userId or action' })
-      }
-      
-      // Validate action type
-      if (!['credit', 'debit'].includes(action)) {
-        return res.status(400).json({ error: 'Action must be "credit" or "debit"' })
-      }
-      
-      // Validate amount
-      if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
-        return res.status(400).json({ error: 'Valid amount is required' })
-      }
-      
-      const numericAmount = Number(amount)
-      
-      // Get current user balance
-      const { data: user, error: userError } = await supabase
-        .from('profiles')
-        .select('balance')
-        .eq('id', userId)
-        .single()
-      
-      if (userError || !user) {
-        return res.status(404).json({ error: 'User not found' })
-      }
-      
-      const currentBalance = user.balance || 0
-      let newBalance
-      let updateError
-      
-      // Process credit or debit
-      if (action === 'credit') {
-        newBalance = currentBalance + numericAmount
-        const { error } = await supabase
-          .from('profiles')
-          .update({ balance: newBalance })
-          .eq('id', userId)
-        updateError = error
-      } else { // debit
-        if (currentBalance < numericAmount) {
-          return res.status(400).json({ error: 'Insufficient balance' })
+      // Wallet operations
+      if (action === 'credit' || action === 'debit') {
+        if (!userId || !amount || isNaN(Number(amount)) || Number(amount) <= 0) {
+          return res.status(400).json({ error: 'Valid userId and amount required' })
         }
-        newBalance = currentBalance - numericAmount
-        const { error } = await supabase
+        
+        const numericAmount = Number(amount)
+        
+        const { data: user, error: userError } = await supabase
           .from('profiles')
-          .update({ balance: newBalance })
+          .select('balance')
           .eq('id', userId)
-        updateError = error
+          .single()
+        
+        if (userError || !user) {
+          return res.status(404).json({ error: 'User not found' })
+        }
+        
+        const currentBalance = user.balance || 0
+        let newBalance
+        let updateError
+        
+        if (action === 'credit') {
+          newBalance = currentBalance + numericAmount
+          const { error } = await supabase
+            .from('profiles')
+            .update({ balance: newBalance })
+            .eq('id', userId)
+          updateError = error
+        } else {
+          if (currentBalance < numericAmount) {
+            return res.status(400).json({ error: 'Insufficient balance' })
+          }
+          newBalance = currentBalance - numericAmount
+          const { error } = await supabase
+            .from('profiles')
+            .update({ balance: newBalance })
+            .eq('id', userId)
+          updateError = error
+        }
+        
+        if (updateError) throw updateError
+        
+        return res.status(200).json({
+          success: true,
+          message: `Wallet ${action}ed successfully`,
+          action: action,
+          amount: numericAmount,
+          previousBalance: currentBalance,
+          newBalance: newBalance
+        })
       }
       
-      if (updateError) {
-        throw updateError
+      // NEW: Process manual order
+      if (action === 'complete_manual_order') {
+        const { orderId, status, notes } = req.body
+        
+        if (!orderId) {
+          return res.status(400).json({ error: 'orderId required' })
+        }
+        
+        const { data: order, error: orderError } = await supabase
+          .from('orders')
+          .update({ 
+            status: status || 'completed',
+            notes: notes || 'Manual delivery completed',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', orderId)
+          .select()
+          .single()
+        
+        if (orderError) throw orderError
+        
+        return res.status(200).json({
+          success: true,
+          message: 'Order marked as completed',
+          order: order
+        })
       }
       
-      // Return success response
-      return res.status(200).json({
-        success: true,
-        message: `Wallet ${action}ed successfully`,
-        action: action,
-        amount: numericAmount,
-        previousBalance: currentBalance,
-        newBalance: newBalance
-      })
+      return res.status(400).json({ error: 'Invalid action' })
       
     } catch (err) {
       console.error('Admin action error:', err)
@@ -131,6 +144,5 @@ export default async function handler(req, res) {
     }
   }
 
-  // Method not allowed
   return res.status(405).json({ error: 'Method not allowed' })
 }
