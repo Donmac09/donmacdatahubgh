@@ -33,8 +33,7 @@ export default function Dashboard({ setPage }) {
   useEffect(() => {
     loadConfig()
     loadRecentOrders()
-    getAnnouncements(true).then(a => setAnnouncement(a[0] || null)).catch(() => {})
-  }, [profile])
+    getAnnouncements(true, profile?.role).then(a => setAnnouncement(a[0] || null)).catch(() => {})
 
   async function loadConfig() {
     try {
