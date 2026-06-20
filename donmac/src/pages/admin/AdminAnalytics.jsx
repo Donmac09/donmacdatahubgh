@@ -3,11 +3,8 @@ import { supabase } from '../../lib/supabase'
 import { formatCurrency } from '../../lib/utils'
 import { StatCard, Card } from '../../components/ui'
 import { getGHDataWalletBalance, GHDATA_TOKEN } from '../../lib/packages'
-import useAuthStore from '../../store/authStore'
-import toast from 'react-hot-toast'
 
 export default function AdminAnalytics() {
-  const { profile } = useAuthStore()
   const [stats, setStats] = useState({ 
     revenue: 0, 
     users: 0, 
@@ -51,14 +48,13 @@ export default function AdminAnalytics() {
     setLoadingBalance(true)
     setBalanceError(null)
     try {
-      // Use the GHData token directly
+      console.log('🔍 Fetching GHData balance...')
       const balance = await getGHDataWalletBalance(GHDATA_TOKEN)
-      console.log('GHData Balance Response:', balance)
+      console.log('📊 GHData Balance:', balance)
       setGhdataBalance(balance)
     } catch (error) {
-      console.error('Error fetching GHData balance:', error)
+      console.error('❌ Error fetching GHData balance:', error)
       setBalanceError(error.message || 'Failed to fetch balance')
-      // Don't show toast - just show error in UI
     } finally {
       setLoadingBalance(false)
     }
@@ -90,7 +86,7 @@ export default function AdminAnalytics() {
             className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
             disabled={loadingBalance}
           >
-            {loadingBalance ? 'Refreshing...' : '↻ Refresh'}
+            {loadingBalance ? '⏳ Refreshing...' : '↻ Refresh'}
           </button>
         </div>
         
