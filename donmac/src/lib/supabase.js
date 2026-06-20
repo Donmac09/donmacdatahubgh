@@ -158,9 +158,12 @@ export async function upsertPackageConfig(configRow) {
   if (error) throw error
 }
 
-export async function getAnnouncements(activeOnly = false) {
+export async function getAnnouncements(activeOnly = false, userRole = null) {
   let q = supabase.from('announcements').select('*').order('created_at', { ascending: false })
   if (activeOnly) q = q.eq('active', true)
+  if (userRole) {
+    q = q.or(`target.eq.all,target.eq.${userRole}`)
+  }
   const { data, error } = await q
   if (error) throw error
   return data || []
