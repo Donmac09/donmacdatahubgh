@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import useAuthStore from '../store/authStore'
 import useCartStore from '../store/cartStore'
-import { getNotifications, markNotifRead, getAnnouncements, subscribeNotifications, subscribeAnnouncements } from '../lib/supabase'
+import { getNotifications, markNotifRead, subscribeNotifications } from '../lib/supabase'
 import { formatCurrency, timeAgo } from '../lib/utils'
 import { sounds } from '../lib/sounds'
 
@@ -10,14 +10,11 @@ export default function Topbar({ page, setPage, collapsed }) {
   const { items: cartItems, setOpen: setCartOpen } = useCartStore()
   const [notifs, setNotifs] = useState([])
   const [showNotifs, setShowNotifs] = useState(false)
-  const [announcement, setAnnouncement] = useState(null)
-  const [showAnnouncement, setShowAnnouncement] = useState(true)
   const notifRef = useRef(null)
 
   useEffect(() => {
     if (!profile?.id) return
     loadNotifs()
-    loadAnnouncement()
 
     const sub = subscribeNotifications(profile.id, (payload) => {
       const n = payload.new
@@ -25,11 +22,9 @@ export default function Topbar({ page, setPage, collapsed }) {
       sounds.notification()
       setShowNotifs(true)
     })
-    const annSub = subscribeAnnouncements(() => loadAnnouncement())
 
     return () => {
       supabase?.removeChannel?.(sub)
-      supabase?.removeChannel?.(annSub)
     }
   }, [profile?.id])
 
@@ -48,38 +43,13 @@ export default function Topbar({ page, setPage, collapsed }) {
     } catch {}
   }
 
-  async function loadAnnouncement() {
-    try {
-      const anns = await getAnnouncements(true)
-      setAnnouncement(anns[0] || null)
-    } catch {}
-  }
-
   const unread = notifs.filter(n => !n.read).length
   const leftPad = collapsed ? 'left-16' : 'left-60'
 
-  const annColors = {
-    info:    'bg-blue-50 border-blue-200 text-blue-800',
-    warning: 'bg-amber-50 border-amber-200 text-amber-800',
-    success: 'bg-green-50 border-green-200 text-green-800',
-    error:   'bg-red-50 border-red-200 text-red-800',
-  }
-
   return (
     <div>
-      {/* Announcement Banner */}
-      {announcement && showAnnouncement && (
-        <div className={`fixed top-0 ${leftPad} right-0 z-20 transition-all duration-300`}>
-          <div className={`flex items-center gap-3 px-6 py-2.5 border-b text-sm font-medium ${annColors[announcement.type] || annColors.info}`}>
-            <span>📢</span>
-            <span className="flex-1">{announcement.message}</span>
-            <button onClick={() => setShowAnnouncement(false)} className="opacity-60 hover:opacity-100 font-bold text-lg leading-none">&times;</button>
-          </div>
-        </div>
-      )}
-
       {/* Topbar */}
-      <header className={`fixed ${leftPad} right-0 z-20 transition-all duration-300 ${announcement && showAnnouncement ? 'top-[42px]' : 'top-0'} bg-white/95 backdrop-blur-md border-b border-gray-100 h-16 flex items-center justify-between px-6 shadow-sm`}>
+      <header className={`fixed ${leftPad} right-0 z-20 transition-all duration-300 top-0 bg-white/95 backdrop-blur-md border-b border-gray-100 h-16 flex items-center justify-between px-6 shadow-sm`}>
         {/* Page Title */}
         <div>
           <h1 className="text-lg font-bold text-gray-900 capitalize">{page === 'admin' ? '⚙️ Admin Panel' : page === 'mystore' ? '🏪 My Store' : page === 'dashboard' ? '🏠 Dashboard' : page === 'topups' ? '💳 Top Ups' : page === 'orders' ? '📦 Orders' : page === 'transactions' ? '💰 Transactions' : page === 'profile' ? '👤 Profile' : page}</h1>
