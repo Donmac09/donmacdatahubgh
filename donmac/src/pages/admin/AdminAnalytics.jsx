@@ -19,6 +19,7 @@ export default function AdminAnalytics() {
   const [topResellers, setTopResellers] = useState([])
   const [ghdataBalance, setGhdataBalance] = useState(null)
   const [loadingBalance, setLoadingBalance] = useState(false)
+  const [balanceError, setBalanceError] = useState(null)
 
   useEffect(() => { 
     load()
@@ -48,23 +49,16 @@ export default function AdminAnalytics() {
 
   async function fetchGHDataBalance() {
     setLoadingBalance(true)
+    setBalanceError(null)
     try {
-      // Get the admin's API token from profile
-      const { data: adminProfile, error } = await supabase
-        .from('profiles')
-        .select('api_token')
-        .eq('id', profile?.id)
-        .single()
-      
-      if (error) throw error
-      
-      // Use the admin's token or fallback to GHDATA_TOKEN
-      const token = adminProfile?.api_token || GHDATA_TOKEN
-      const balance = await getGHDataWalletBalance(token)
+      // Use the GHData token directly
+      const balance = await getGHDataWalletBalance(GHDATA_TOKEN)
+      console.log('GHData Balance Response:', balance)
       setGhdataBalance(balance)
     } catch (error) {
       console.error('Error fetching GHData balance:', error)
-      // Don't show error toast - just fail silently
+      setBalanceError(error.message || 'Failed to fetch balance')
+      // Don't show toast - just show error in UI
     } finally {
       setLoadingBalance(false)
     }
@@ -105,6 +99,11 @@ export default function AdminAnalytics() {
             <div className="flex items-center justify-center py-4">
               <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
             </div>
+          ) : balanceError ? (
+            <div className="text-center py-4">
+              <p className="text-sm text-red-500">⚠️ {balanceError}</p>
+              <p className="text-xs text-gray-400 mt-1">Check your API token and connection</p>
+            </div>
           ) : ghdataBalance ? (
             <div className="flex items-center justify-between">
               <div>
@@ -120,8 +119,8 @@ export default function AdminAnalytics() {
             </div>
           ) : (
             <div className="text-center py-4">
-              <p className="text-sm text-gray-500">Unable to fetch GHData balance</p>
-              <p className="text-xs text-gray-400 mt-1">Check your API token configuration</p>
+              <p className="text-sm text-gray-500">No balance data available</p>
+              <p className="text-xs text-gray-400 mt-1">Click refresh to try again</p>
             </div>
           )}
         </div>
