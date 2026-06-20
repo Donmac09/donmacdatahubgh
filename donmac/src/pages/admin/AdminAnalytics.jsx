@@ -4,19 +4,10 @@ import { formatCurrency } from '../../lib/utils'
 import { StatCard, Card } from '../../components/ui'
 
 export default function AdminAnalytics() {
-  const [stats, setStats] = useState({ 
-    revenue: 0, 
-    users: 0, 
-    orders: 0, 
-    pending: 0, 
-    resellers: 0, 
-    delivered: 0 
-  })
+  const [stats, setStats] = useState({ revenue: 0, users: 0, orders: 0, pending: 0, resellers: 0, delivered: 0 })
   const [topResellers, setTopResellers] = useState([])
 
-  useEffect(() => { 
-    load()
-  }, [])
+  useEffect(() => { load() }, [])
 
   async function load() {
     try {
@@ -50,6 +41,7 @@ export default function AdminAnalytics() {
         <StatCard icon="🏪" label="Resellers" value={stats.resellers} color="purple" />
       </div>
 
+      {/* Top Resellers */}
       <Card className="p-6">
         <h3 className="font-bold text-gray-900 mb-4">🏆 Top Resellers</h3>
         {topResellers.length === 0 ? (
