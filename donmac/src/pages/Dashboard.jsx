@@ -31,10 +31,10 @@ export default function Dashboard({ setPage }) {
   }, [])
 
   useEffect(() => {
-    loadConfig()
-    loadRecentOrders()
-    getAnnouncements(true).then(a => setAnnouncement(a[0] || null)).catch(() => {})
-
+  loadConfig()
+  loadRecentOrders()
+  getAnnouncements(true).then(a => setAnnouncement(a[0] || null)).catch(() => {})
+}, [profile])
   async function loadConfig() {
     try {
       const cfg = await getPackagesConfig()
