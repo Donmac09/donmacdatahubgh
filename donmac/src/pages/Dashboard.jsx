@@ -136,9 +136,15 @@ export default function Dashboard({ setPage }) {
         </div>
       </div>
 
-      {/* Grid Stats System - REMOVED: operational, purchase logs, ledger audit, load history, live activity feeds */}
-      <div className="grid grid-cols-2 lg:grid-cols-2 gap-4">
+      {/* Grid Stats - Wallet Balance, Account Level, Gateway Connection */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
         <StatCard icon="💰" label="Wallet Balance" value={formatCurrency(profile?.balance || 0)} color="indigo" />
+        <StatCard 
+          icon="🛡️" 
+          label="Account Level" 
+          value={profile?.role ? profile.role.toUpperCase() : 'CUSTOMER'} 
+          color={profile?.role === 'reseller' ? 'purple' : 'emerald'} 
+        />
         <StatCard 
           icon="⚡" 
           label="Gateway Connection" 
@@ -147,7 +153,7 @@ export default function Dashboard({ setPage }) {
         />
       </div>
 
-      {/* Modular Desktop Action Drawer - REMOVED: Purchase Logs, Ledger Audits, Load History */}
+      {/* System Control Actions - Removed: Purchase Logs, Ledger Audits, Load History */}
       <Card className="p-6 bg-white border border-slate-100 shadow-sm rounded-2xl">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-slate-800 text-xs uppercase tracking-widest">System Control & Operations</h3>
@@ -174,26 +180,23 @@ export default function Dashboard({ setPage }) {
         </div>
       </Card>
 
-      {/* Main Core Catalog Content Grid - REMOVED: Live Activity Feeds sidebar */}
-      <div className="grid grid-cols-1 gap-6">
-        {/* Packages Catalogue Lists */}
+      {/* Packages - Full width, removed Live Activity Feeds sidebar */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between pb-2 border-b border-slate-200/60">
+          <h3 className="font-extrabold text-slate-900 text-lg">Product Rate Packages</h3>
+          <span className="text-xs text-slate-500 font-medium">Updated live</span>
+        </div>
         <div className="space-y-4">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-200/60">
-            <h3 className="font-extrabold text-slate-900 text-lg">Product Rate Packages</h3>
-            <span className="text-xs text-slate-500 font-medium">Updated live</span>
-          </div>
-          <div className="space-y-4">
-            {Object.entries(PACKAGES).map(([key, group]) => (
-              <PackageCard
-                key={key}
-                groupKey={key}
-                group={group}
-                pkgConfig={pkgConfig}
-                resellerPrices={resellerPrices}
-                onBuy={(gk, item, price) => setBuyState({ groupKey: gk, item, price })}
-              />
-            ))}
-          </div>
+          {Object.entries(PACKAGES).map(([key, group]) => (
+            <PackageCard
+              key={key}
+              groupKey={key}
+              group={group}
+              pkgConfig={pkgConfig}
+              resellerPrices={resellerPrices}
+              onBuy={(gk, item, price) => setBuyState({ groupKey: gk, item, price })}
+            />
+          ))}
         </div>
       </div>
 
@@ -202,7 +205,7 @@ export default function Dashboard({ setPage }) {
         <BuyModal {...buyState} onClose={() => setBuyState(null)} />
       )}
 
-      {/* Refactored Top Up Modal */}
+      {/* Top Up Modal */}
       {showTopup && (
         <Modal title="💳 Deposit Gateway Manual Panel" onClose={() => setShowTopup(false)} size="sm">
           <div className="space-y-4 pt-2">
