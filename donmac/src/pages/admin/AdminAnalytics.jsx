@@ -17,6 +17,7 @@ export default function AdminAnalytics() {
   const [ghdataBalance, setGhdataBalance] = useState(null)
   const [loadingBalance, setLoadingBalance] = useState(false)
   const [balanceError, setBalanceError] = useState(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => { 
     load()
@@ -41,6 +42,8 @@ export default function AdminAnalytics() {
       setTopResellers(resellers)
     } catch (error) {
       console.error('Error loading stats:', error)
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -55,12 +58,25 @@ export default function AdminAnalytics() {
     } catch (error) {
       console.error('❌ Error fetching GHData balance:', error)
       setBalanceError(error.message || 'Failed to fetch balance')
+      // Don't throw - just show error in UI
     } finally {
       setLoadingBalance(false)
     }
   }
 
   const medals = ['🥇', '🥈', '🥉']
+
+  // Show loading state
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="text-center">
+          <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <p className="mt-3 text-sm text-gray-500">Loading analytics...</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -74,7 +90,7 @@ export default function AdminAnalytics() {
         <StatCard icon="🏪" label="Resellers" value={stats.resellers} color="purple" />
       </div>
 
-      {/* GHData Wallet Balance - ADD THIS CARD */}
+      {/* GHData Wallet Balance */}
       <Card className="p-6">
         <div className="flex items-center justify-between">
           <div>
