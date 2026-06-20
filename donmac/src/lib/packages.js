@@ -187,6 +187,8 @@ export const GHDATA_BASE = 'https://ghdataconnect.com/api';
  * Endpoint: POST /v1/purchaseBundle
  */
 export async function placeGHDataOrder({ network, phone, dataAmount, token = GHDATA_TOKEN }) {
+  console.log('📤 Sending GHData order:', { network, phone, dataAmount })
+  
   const response = await fetch(`${GHDATA_BASE}/v1/purchaseBundle`, {
     method: 'POST',
     headers: {
@@ -202,13 +204,19 @@ export async function placeGHDataOrder({ network, phone, dataAmount, token = GHD
     })
   });
 
+  const responseText = await response.text();
+  console.log('📥 GHData response:', response.status, responseText);
+
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`GHData API error: ${response.status} - ${errorText}`);
+    throw new Error(`GHData API error: ${response.status} - ${responseText}`);
   }
 
-  const data = await response.json();
-  return data;
+  try {
+    const data = JSON.parse(responseText);
+    return data;
+  } catch (e) {
+    return { success: true, message: responseText };
+  }
 }
 
 /**
