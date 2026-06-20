@@ -3,9 +3,9 @@ import { supabase } from '../../lib/supabase'
 import { formatCurrency } from '../../lib/utils'
 import { StatCard, Card } from '../../components/ui'
 import { getGHDataWalletBalance, GHDATA_TOKEN } from '../../lib/packages'
-import toast from 'react-hot-toast'
 
 export default function AdminAnalytics() {
+  const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState({ 
     revenue: 0, 
     users: 0, 
@@ -20,11 +20,12 @@ export default function AdminAnalytics() {
   const [balanceError, setBalanceError] = useState(null)
 
   useEffect(() => { 
-    load()
+    loadStats()
     fetchGHDataBalance()
   }, [])
 
-  async function load() {
+  async function loadStats() {
+    setLoading(true)
     try {
       const [{ data: orders }, { data: users }] = await Promise.all([
         supabase.from('orders').select('amount,status'),
@@ -42,6 +43,8 @@ export default function AdminAnalytics() {
       setTopResellers(resellers)
     } catch (error) {
       console.error('Error loading stats:', error)
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -49,11 +52,10 @@ export default function AdminAnalytics() {
     setLoadingBalance(true)
     setBalanceError(null)
     try {
-      console.log('🔍 Fetching GHData balance with token:', GHDATA_TOKEN)
+      console.log('🔍 Fetching GHData balance...')
       const balance = await getGHDataWalletBalance(GHDATA_TOKEN)
       console.log('📊 GHData Balance Response:', balance)
       
-      // Handle different response formats
       if (balance && typeof balance === 'object') {
         setGhdataBalance(balance)
       } else {
@@ -68,6 +70,18 @@ export default function AdminAnalytics() {
   }
 
   const medals = ['🥇', '🥈', '🥉']
+
+  // Show loading state
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="text-center">
+          <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <p className="mt-3 text-sm text-gray-500">Loading analytics...</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -93,7 +107,7 @@ export default function AdminAnalytics() {
             className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
             disabled={loadingBalance}
           >
-            {loadingBalance ? 'Refreshing...' : '↻ Refresh'}
+            {loadingBalance ? '⏳ Refreshing...' : '↻ Refresh'}
           </button>
         </div>
         
