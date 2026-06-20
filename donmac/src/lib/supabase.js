@@ -30,24 +30,24 @@ export async function signOut() {
 }
 
 export async function getProfile(userId) {
+  // First get the user's session to ensure we have valid auth
+  const { data: { session } } = await supabase.auth.getSession()
+  
+  if (!session) {
+    throw new Error('No active session')
+  }
+  
+  // Use the session access token for the query
   const { data, error } = await supabase
     .from('profiles')
     .select('*, store:stores(*), reseller:reseller_id(id,name,store:stores(*))')
     .eq('id', userId)
     .single()
-  if (error) throw error
-  return data
-}
-
-export async function updateProfile(userId, updates) {
-  const { data, error } = await supabase.from('profiles').update(updates).eq('id', userId).select().single()
-  if (error) throw error
-  return data
-}
-
-export async function placeOrder(order) {
-  const { data, error } = await supabase.from('orders').insert(order).select().single()
-  if (error) throw error
+    
+  if (error) {
+    console.error('Error fetching profile:', error)
+    throw error
+  }
   return data
 }
 
