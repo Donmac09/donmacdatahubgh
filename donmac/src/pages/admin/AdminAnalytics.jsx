@@ -74,7 +74,7 @@ export default function AdminAnalytics() {
         <StatCard icon="🏪" label="Resellers" value={stats.resellers} color="purple" />
       </div>
 
-      {/* GHData Wallet Balance */}
+      {/* GHData Wallet Balance - ADD THIS CARD */}
       <Card className="p-6">
         <div className="flex items-center justify-between">
           <div>
