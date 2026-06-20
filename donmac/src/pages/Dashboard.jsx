@@ -111,7 +111,6 @@ export default function Dashboard({ setPage }) {
 
       {/* Hero Header Section */}
       <div className="relative overflow-hidden rounded-2xl bg-slate-900 border border-slate-800 p-6 sm:p-8 text-white shadow-xl shadow-slate-950/20">
-        {/* Subtle Tech Glow Background Art */}
         <div className="absolute -right-10 -top-10 w-72 h-72 rounded-full bg-indigo-500/10 blur-3xl pointer-events-none" />
         <div className="absolute -right-20 bottom-0 w-52 h-52 rounded-full bg-purple-500/10 blur-2xl pointer-events-none" />
         
@@ -128,7 +127,6 @@ export default function Dashboard({ setPage }) {
             <p className="text-slate-400 text-sm">Manage your premium packages and data balances layout effortlessly.</p>
           </div>
 
-          {/* Premium Balance Card Display */}
           <div className="bg-slate-800/60 backdrop-blur-md border border-slate-700/50 rounded-xl p-4 min-w-[240px] flex flex-col items-start md:items-end shadow-inner">
             <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-1">Available Balance</p>
             <p className="text-3xl sm:text-4xl font-black tracking-tight text-emerald-400 font-mono">
@@ -138,16 +136,9 @@ export default function Dashboard({ setPage }) {
         </div>
       </div>
 
-      {/* Grid Stats System */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Grid Stats System - REMOVED: operational, purchase logs, ledger audit, load history, live activity feeds */}
+      <div className="grid grid-cols-2 lg:grid-cols-2 gap-4">
         <StatCard icon="💰" label="Wallet Balance" value={formatCurrency(profile?.balance || 0)} color="indigo" />
-        <StatCard icon="📦" label="Recent Activity" value={`${orders.length} Orders`} color="amber" />
-        <StatCard 
-          icon="🛡️" 
-          label="Account Level" 
-          value={profile?.role ? profile.role.toUpperCase() : 'CUSTOMER'} 
-          color={profile?.role === 'reseller' ? 'purple' : 'emerald'} 
-        />
         <StatCard 
           icon="⚡" 
           label="Gateway Connection" 
@@ -156,13 +147,13 @@ export default function Dashboard({ setPage }) {
         />
       </div>
 
-      {/* Modular Desktop Action Drawer */}
+      {/* Modular Desktop Action Drawer - REMOVED: Purchase Logs, Ledger Audits, Load History */}
       <Card className="p-6 bg-white border border-slate-100 shadow-sm rounded-2xl">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-slate-800 text-xs uppercase tracking-widest">System Control & Operations</h3>
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping"></span>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <button onClick={() => setShowTopup(true)}
             className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-slate-50 border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50/30 transition-all duration-200 group shadow-sm">
             <span className="text-xl group-hover:scale-110 transition-transform bg-white p-2 rounded-lg shadow-sm">💳</span>
@@ -180,31 +171,13 @@ export default function Dashboard({ setPage }) {
             <span className="text-xl group-hover:scale-110 transition-transform bg-white p-2 rounded-lg shadow-sm">🧾</span>
             <span className="text-xs font-bold text-slate-700">Claim Token</span>
           </button>
-
-          <button onClick={() => setPage('orders')}
-            className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-slate-50 border border-slate-100 hover:border-blue-200 hover:bg-blue-50/30 transition-all duration-200 group shadow-sm">
-            <span className="text-xl group-hover:scale-110 transition-transform bg-white p-2 rounded-lg shadow-sm">📦</span>
-            <span className="text-xs font-bold text-slate-700">Purchase Logs</span>
-          </button>
-
-          <button onClick={() => setPage('transactions')}
-            className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-slate-50 border border-slate-100 hover:border-pink-200 hover:bg-pink-50/30 transition-all duration-200 group shadow-sm">
-            <span className="text-xl group-hover:scale-110 transition-transform bg-white p-2 rounded-lg shadow-sm">📊</span>
-            <span className="text-xs font-bold text-slate-700">Ledger Audits</span>
-          </button>
-
-          <button onClick={() => setPage('topups')}
-            className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-slate-50 border border-slate-100 hover:border-emerald-200 hover:bg-emerald-50/30 transition-all duration-200 group shadow-sm">
-            <span className="text-xl group-hover:scale-110 transition-transform bg-white p-2 rounded-lg shadow-sm">📜</span>
-            <span className="text-xs font-bold text-slate-700">Load History</span>
-          </button>
         </div>
       </Card>
 
-      {/* Main Core Catalog Content Grid */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
+      {/* Main Core Catalog Content Grid - REMOVED: Live Activity Feeds sidebar */}
+      <div className="grid grid-cols-1 gap-6">
         {/* Packages Catalogue Lists */}
-        <div className="xl:col-span-2 space-y-4">
+        <div className="space-y-4">
           <div className="flex items-center justify-between pb-2 border-b border-slate-200/60">
             <h3 className="font-extrabold text-slate-900 text-lg">Product Rate Packages</h3>
             <span className="text-xs text-slate-500 font-medium">Updated live</span>
@@ -221,36 +194,6 @@ export default function Dashboard({ setPage }) {
               />
             ))}
           </div>
-        </div>
-
-        {/* Recent Orders Secondary Sidebar */}
-        <div className="space-y-4">
-          <div className="pb-2 border-b border-slate-200/60">
-            <h3 className="font-extrabold text-slate-900 text-lg">Live Activity Feeds</h3>
-          </div>
-          <Card className="p-4 bg-white border border-slate-100 shadow-sm rounded-2xl space-y-3">
-            {orders.length === 0 ? (
-              <p className="text-sm text-slate-400 text-center py-6">No recent pipeline transactions found.</p>
-            ) : (
-              orders.map((order) => (
-                <div key={order.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100 text-xs">
-                  <div className="space-y-1">
-                    <p className="font-bold text-slate-800">{order.package_name || 'Data Bundle'}</p>
-                    <p className="font-mono text-slate-400 text-[10px]">{order.recipient || order.phone}</p>
-                  </div>
-                  <div className="text-right space-y-1">
-                    <p className="font-mono font-bold text-slate-900">{formatCurrency(order.price || 0)}</p>
-                    <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                      order.status === 'success' ? 'bg-emerald-100 text-emerald-800' : 
-                      order.status === 'failed' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'
-                    }`}>
-                      {order.status || 'pending'}
-                    </span>
-                  </div>
-                </div>
-              ))
-            )}
-          </Card>
         </div>
       </div>
 
