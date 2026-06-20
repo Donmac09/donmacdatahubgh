@@ -104,49 +104,66 @@ export default function CartDrawer({ onOrderPlaced }) {
           type: 'order',
         })
 
-        // Send to GHData if NOT a manual package
-        if (!isManual && group?.ghdata_type && group.ghdata_type !== 'mtn-ishare') {
+        // ============================================================
+        // GHData Integration - Send to API
+        // ============================================================
+        const numericAmount = extractNumericAmount(item.data)
+        
+        // Check if this is a GHData package (not manual)
+        if (!isManual && group?.ghdata_type) {
           try {
-            const numericAmount = extractNumericAmount(item.data)
-            
-            // For AirtelTigo Premium and Big Time
-            if (group.ghdata_type === 'atishare' || group.ghdata_type === 'atbigtime') {
-              await placeGHDataOrder({
-                network: group.ghdata_type,
+            console.log('🚀 Sending to GHData:', {
+              ghdata_type: group.ghdata_type,
+              network: group.ghdata_type,
+              phone: item.phone,
+              amount: numericAmount,
+              ref: ref
+            })
+
+            let result
+            if (group.ghdata_type === 'mtn-ishare') {
+              // This shouldn't happen since isManual covers it, but just in case
+              result = await placeIshareOrder({
+                network: 'mtn',
                 phone: item.phone,
-                dataAmount: numericAmount
+                dataAmount: numericAmount * 1000 // Convert GB to MB
               })
             } else {
-              // MTN and Telecel
-              await placeGHDataOrder({
+              // Regular GHData order
+              result = await placeGHDataOrder({
                 network: group.ghdata_type,
                 phone: item.phone,
                 dataAmount: numericAmount
               })
             }
-            console.log(`✅ GHData order placed: ${ref}`)
+            
+            console.log('✅ GHData order result:', result)
+            
+            // Update order with GHData reference if returned
+            if (result?.reference || result?.order_id) {
+              await supabase
+                .from('orders')
+                .update({ 
+                  ghdata_ref: result.reference || result.order_id,
+                  ghdata_status: 'sent'
+                })
+                .eq('id', order.id)
+            }
           } catch (ghError) {
-            console.error('GHData delivery failed:', ghError)
+            console.error('❌ GHData delivery failed:', ghError)
             // Don't throw - order is already created
-            // Admin will need to process manually
+            // Admin will see this and can process manually
           }
         } else if (isManual) {
-          // MTN Mashup - use iShare endpoint
-          try {
-            const numericAmount = extractNumericAmount(item.data)
-            await placeIshareOrder({
-              network: 'mtn',
-              phone: item.phone,
-              dataAmount: numericAmount * 1000 // Convert GB to MB if needed
-            })
-            console.log(`✅ iShare order placed: ${ref}`)
-          } catch (ghError) {
-            console.error('iShare delivery failed:', ghError)
-            // Don't throw - order is already created
-          }
-        } else {
-          // Log that this is a manual order
           console.log(`📝 Manual order created: ${ref} - ${group?.network} ${item.data}`)
+          // Update order to indicate manual processing needed
+          await supabase
+            .from('orders')
+            .update({ 
+              ghdata_status: 'manual',
+              notes: 'MTN Mashup package requires manual delivery'
+            })
+            .eq('id', order.id)
         }
       }
 
@@ -157,6 +174,7 @@ export default function CartDrawer({ onOrderPlaced }) {
       setOpen(false)
       onOrderPlaced?.()
     } catch (err) {
+      console.error('Checkout error:', err)
       toast.error(err.message || 'Failed to place order')
       sounds.error()
     } finally {
