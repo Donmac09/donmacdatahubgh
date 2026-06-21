@@ -6,66 +6,98 @@ const supabaseServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()
 
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey)
 
-const BLOCKED_TOKENS = new Set([
-  'AMOUNT', 'STATUS', 'MOBILE', 'BALANC', 'VOLUME', 'MASHUP', 
-  'PREMIU', 'BUNDLE', 'VODAFO', 'TELECE', 'AIRTEL', 'MOMOPY'
-])
-
 function parseSMS(text) {
-  const result = { amount: null, txId: null, refCode: null, network: 'MoMo', possibleRefs: [] }
+  const result = { 
+    amount: null, 
+    txId: null, 
+    refCode: null, 
+    network: 'MoMo', 
+    possibleRefs: [] 
+  }
+  
   if (!text) return result
 
+  // ============================================================
+  // 1. Extract Amount
+  // ============================================================
   const amountMatch = text.match(/GHS\s*([0-9]+(?:\.[0-9]{1,2})?)/i) || 
                       text.match(/([0-9]+(?:\.[0-9]{1,2})?)\s*GHS/i)
   if (amountMatch) result.amount = parseFloat(amountMatch[1])
 
-  const txMatch = text.match(/\b([A-Z0-9]{9,14})\b/i) || 
-                  text.match(/(?:txn|transaction|id)[:\s#]*([0-9A-Z]+)/i)
+  // ============================================================
+  // 2. Extract Transaction ID
+  // ============================================================
+  const txMatch = text.match(/(?:Trans|Txn|Transaction|Tx)\s*(?:ID|Id|id)?\s*[:#]?\s*([A-Z0-9]{8,20})/i) ||
+                  text.match(/\b([A-Z0-9]{9,15})\b/i)
   if (txMatch) result.txId = txMatch[1].toUpperCase()
 
+  // ============================================================
+  // 3. Extract Reference Code (6 characters)
+  // ============================================================
   const allSixCharMatches = text.match(/\b([A-Z0-9]{6})\b/gi)
+  
+  const BLOCKED_TOKENS = new Set([
+    'AMOUNT', 'STATUS', 'MOBILE', 'BALANC', 'VOLUME', 'MASHUP', 
+    'PREMIU', 'BUNDLE', 'VODAFO', 'TELECE', 'AIRTEL', 'MOMOPY',
+    'MTN', 'VODA', 'TIGO', 'MOMO', 'CASH', 'GHANA', 'PAY',
+    'LUKMAN', 'KOFI', 'AMA', 'YAW', 'KWAME', 'AKUA',
+    'JOE', 'MIKE', 'JOHN', 'PETER', 'DAVID', 'PAUL'
+  ])
+
   if (allSixCharMatches) {
     const cleanTokens = allSixCharMatches
       .map(t => t.toUpperCase())
       .filter(t => {
+        if (t.length !== 6) return false
         if (/^\d+$/.test(t)) return false
         if (BLOCKED_TOKENS.has(t)) return false
         return true
       })
 
     result.possibleRefs = [...new Set(cleanTokens)]
-    if (result.possibleRefs.length > 0) result.refCode = result.possibleRefs[0]
+    
+    // Prefer reference that appears after "Ref:" or "Reference:"
+    const refPatternMatch = text.match(/(?:Ref|Reference)[:\s#]*([A-Z0-9]{6})\b/i)
+    if (refPatternMatch) {
+      const refFromPattern = refPatternMatch[1].toUpperCase()
+      if (result.possibleRefs.includes(refFromPattern)) {
+        result.refCode = refFromPattern
+      } else {
+        result.refCode = result.possibleRefs[0] || null
+      }
+    } else {
+      result.refCode = result.possibleRefs[0] || null
+    }
   }
 
+  // ============================================================
+  // 4. Detect Network
+  // ============================================================
   const lowerText = text.toLowerCase()
-  if (lowerText.includes('mtn') || lowerText.includes('mobile money') || lowerText.includes('momo')) {
+  if (lowerText.includes('mtn') || lowerText.includes('momo')) {
     result.network = 'MTN MoMo'
   } else if (lowerText.includes('vodafone') || lowerText.includes('telecel') || lowerText.includes('cash')) {
-    result.network = 'Telecel'
+    result.network = 'Telecel Cash'
   } else if (lowerText.includes('airtel') || lowerText.includes('tigo') || lowerText.includes('at money')) {
-    result.network = 'AirtelTigo'
+    result.network = 'AirtelTigo Money'
   }
 
   return result
 }
 
-// Helper function to extract SMS text from any payload format
 function extractSmsText(body) {
-  // List of possible field names that might contain the SMS text
   const possibleFields = [
     'message', 'sms', 'text', 'body', 'Content', 'Body', 
     'content', 'msg', 'payload', 'data', 'MESSAGE', 
-    'SMS', 'Text', 'Message', 'Body'
+    'SMS', 'Text', 'Message'
   ]
   
-  // Check each field
   for (const field of possibleFields) {
     if (body[field] && typeof body[field] === 'string' && body[field].length > 5) {
       return body[field]
     }
   }
   
-  // If body has a 'data' object, check inside it
   if (body.data && typeof body.data === 'object') {
     for (const field of possibleFields) {
       if (body.data[field] && typeof body.data[field] === 'string' && body.data[field].length > 5) {
@@ -74,7 +106,6 @@ function extractSmsText(body) {
     }
   }
   
-  // If body has a 'payload' object, check inside it
   if (body.payload && typeof body.payload === 'object') {
     for (const field of possibleFields) {
       if (body.payload[field] && typeof body.payload[field] === 'string' && body.payload[field].length > 5) {
@@ -83,12 +114,10 @@ function extractSmsText(body) {
     }
   }
   
-  // If all else fails, try to find any string in the body that looks like an SMS
   if (typeof body === 'object') {
     for (const key of Object.keys(body)) {
       if (typeof body[key] === 'string' && body[key].length > 20) {
-        // Check if it looks like an SMS (contains GHS, amount, or reference code)
-        if (body[key].match(/GHS|REF|MOMO|MTN|TELECEL|AIRTEL|TIGO/i)) {
+        if (body[key].match(/GHS|REF|MOMO|MTN|TELECEL|AIRTEL|TIGO|Ghana|received|payment/i)) {
           return body[key]
         }
       }
@@ -99,7 +128,6 @@ function extractSmsText(body) {
 }
 
 export default async function handler(req, res) {
-  // Allow GET for testing
   if (req.method === 'GET') {
     return res.status(200).json({ 
       success: true, 
@@ -113,15 +141,11 @@ export default async function handler(req, res) {
 
   try {
     const body = req.body
-    
-    // Log the incoming payload for debugging
     console.log('📥 Webhook received:', JSON.stringify(body, null, 2))
     
-    // Extract SMS text from any format
     const rawSms = extractSmsText(body)
 
     if (!rawSms || !rawSms.trim()) {
-      console.log('❌ No SMS text found in payload')
       return res.status(400).json({ 
         error: 'Payload body cannot be blank',
         received: body,
@@ -129,11 +153,18 @@ export default async function handler(req, res) {
       })
     }
 
-    console.log('📝 SMS text extracted:', rawSms)
+    console.log('📝 SMS text:', rawSms)
 
     const parsed = parseSMS(rawSms)
-    console.log('🔍 Parsed:', { txId: parsed.txId, amount: parsed.amount, refs: parsed.possibleRefs })
+    console.log('🔍 Parsed:', { 
+      txId: parsed.txId, 
+      amount: parsed.amount, 
+      refCode: parsed.refCode,
+      possibleRefs: parsed.possibleRefs,
+      network: parsed.network
+    })
 
+    // Check if transaction already exists
     if (parsed.txId) {
       const { data: existingTx } = await supabaseAdmin
         .from('topups')
@@ -145,16 +176,19 @@ export default async function handler(req, res) {
         if (existingTx.status === 'claimed') {
           return res.status(200).json({ success: true, message: 'Transaction already settled' })
         }
-        if (existingTx.status === 'unclaimed' && parsed.possibleRefs.length === 0) {
-          return res.status(200).json({ success: true, message: 'Unclaimed record logged' })
-        }
       }
     }
 
     let credited = false
     let creditedUserId = null
 
-    for (const token of parsed.possibleRefs) {
+    // Try each possible reference code
+    const refsToTry = parsed.refCode ? [parsed.refCode, ...parsed.possibleRefs] : parsed.possibleRefs
+    const uniqueRefs = [...new Set(refsToTry)]
+
+    for (const token of uniqueRefs) {
+      if (!token) continue
+      
       const { data: topupRows } = await supabaseAdmin
         .from('topups')
         .select('*')
@@ -231,7 +265,12 @@ export default async function handler(req, res) {
       success: true,
       credited,
       user_id: creditedUserId,
-      extracted: { amount: parsed.amount, txId: parsed.txId, refCode: parsed.refCode }
+      extracted: { 
+        amount: parsed.amount, 
+        txId: parsed.txId, 
+        refCode: parsed.refCode,
+        possibleRefs: parsed.possibleRefs
+      }
     })
 
   } catch (globalError) {
