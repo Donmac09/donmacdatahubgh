@@ -4,7 +4,7 @@ import useAuthStore from '../store/authStore'
 import { formatCurrency } from '../lib/utils'
 import { Btn } from './ui'
 import { supabase } from '../lib/supabase'
-import { PACKAGES, placeGHDataOrder, placeIshareOrder } from '../lib/packages'
+import { PACKAGES } from '../lib/packages'
 import { generateRef } from '../lib/utils'
 import { sounds } from '../lib/sounds'
 import toast from 'react-hot-toast'
@@ -13,31 +13,9 @@ export default function CartDrawer({ onOrderPlaced }) {
   const { items, removeItem, clear, setOpen, total } = useCartStore()
   const { profile, refreshProfile } = useAuthStore()
   const [loading, setLoading] = useState(false)
+  const [processingOrders, setProcessingOrders] = useState([])
 
   const totalAmount = items.reduce((s, i) => s + (i.price || 0), 0)
-
-  /**
-   * Extract numeric value from package data string
-   * e.g., "1.7GB" -> 1.7, "350mins + 870MB" -> 870
-   */
-  function extractNumericAmount(dataString) {
-    // Try to extract GB value first
-    const gbMatch = dataString.match(/([\d.]+)\s*GB/i)
-    if (gbMatch) {
-      return parseFloat(gbMatch[1])
-    }
-    // Try to extract MB value
-    const mbMatch = dataString.match(/([\d.]+)\s*MB/i)
-    if (mbMatch) {
-      return parseFloat(mbMatch[1])
-    }
-    // Try to extract any number
-    const numMatch = dataString.match(/([\d.]+)/)
-    if (numMatch) {
-      return parseFloat(numMatch[1])
-    }
-    return 1 // fallback
-  }
 
   async function handleCheckout() {
     if (!profile) return
@@ -47,6 +25,8 @@ export default function CartDrawer({ onOrderPlaced }) {
       return
     }
     setLoading(true)
+    const orderIds = []
+    
     try {
       for (const item of items) {
         const ref = generateRef()
@@ -80,6 +60,8 @@ export default function CartDrawer({ onOrderPlaced }) {
         }).select().single()
         if (orderErr) throw orderErr
 
+        orderIds.push(order.id)
+
         // Debit wallet
         await supabase.rpc('credit_user', {
           p_user_id: profile.id,
@@ -103,73 +85,39 @@ export default function CartDrawer({ onOrderPlaced }) {
           message: `Your order for ${group?.network} ${item.data} (Ref: ${ref}) has been placed.`,
           type: 'order',
         })
-
-        // ============================================================
-        // GHData Integration - Send to API
-        // ============================================================
-        const numericAmount = extractNumericAmount(item.data)
-        
-        // Check if this is a GHData package (not manual)
-        if (!isManual && group?.ghdata_type) {
-          try {
-            console.log('🚀 Sending to GHData:', {
-              ghdata_type: group.ghdata_type,
-              network: group.ghdata_type,
-              phone: item.phone,
-              amount: numericAmount,
-              ref: ref
-            })
-
-            let result
-            if (group.ghdata_type === 'mtn-ishare') {
-              // This shouldn't happen since isManual covers it, but just in case
-              result = await placeIshareOrder({
-                network: 'mtn',
-                phone: item.phone,
-                dataAmount: numericAmount * 1000 // Convert GB to MB
-              })
-            } else {
-              // Regular GHData order
-              result = await placeGHDataOrder({
-                network: group.ghdata_type,
-                phone: item.phone,
-                dataAmount: numericAmount
-              })
-            }
-            
-            console.log('✅ GHData order result:', result)
-            
-            // Update order with GHData reference if returned
-            if (result?.reference || result?.order_id) {
-              await supabase
-                .from('orders')
-                .update({ 
-                  ghdata_ref: result.reference || result.order_id,
-                  ghdata_status: 'sent'
-                })
-                .eq('id', order.id)
-            }
-          } catch (ghError) {
-            console.error('❌ GHData delivery failed:', ghError)
-            // Don't throw - order is already created
-            // Admin will see this and can process manually
-          }
-        } else if (isManual) {
-          console.log(`📝 Manual order created: ${ref} - ${group?.network} ${item.data}`)
-          // Update order to indicate manual processing needed
-          await supabase
-            .from('orders')
-            .update({ 
-              ghdata_status: 'manual',
-              notes: 'MTN Mashup package requires manual delivery'
-            })
-            .eq('id', order.id)
-        }
       }
 
       await refreshProfile()
       sounds.order()
       toast.success(`${items.length} order(s) placed successfully!`)
+      
+      // Process orders with GHData via Edge Function
+      if (orderIds.length > 0) {
+        setProcessingOrders(orderIds)
+        // Call the Edge Function for each order
+        for (const orderId of orderIds) {
+          try {
+            const response = await fetch(
+              `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fulfill-order`,
+              {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${profile.api_token}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ order_id: orderId })
+              }
+            )
+            const result = await response.json()
+            console.log(`📦 Order ${orderId} fulfillment:`, result)
+          } catch (err) {
+            console.error(`❌ Failed to fulfill order ${orderId}:`, err)
+            // Don't show error to user - order is already placed
+          }
+        }
+        setProcessingOrders([])
+      }
+      
       clear()
       setOpen(false)
       onOrderPlaced?.()
