@@ -30,9 +30,10 @@ export default function Sidebar({ page, setPage, collapsed, setCollapsed }) {
 
   return (
     <aside className={cls(
-      'fixed left-0 top-0 h-screen z-30 flex flex-col transition-all duration-300 ease-in-out',
+      'fixed left-0 top-0 h-screen flex flex-col transition-all duration-300 ease-in-out',
       'bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 border-r border-white/5',
-      collapsed ? 'w-16' : 'w-60'
+      collapsed ? 'w-16' : 'w-60',
+      'z-50' // Changed from z-30 to z-50 to appear above WhatsApp button
     )}>
       {/* Logo */}
       <div className="flex items-center gap-3 px-4 py-5 border-b border-white/10 min-h-[68px]">
