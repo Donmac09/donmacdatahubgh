@@ -1,101 +1,119 @@
-import { cls } from '../lib/utils'
+import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import Sidebar from '../components/Sidebar'
+import Topbar from '../components/Topbar'
+import CartDrawer from '../components/CartDrawer'
+import useCartStore from '../store/cartStore'
 import useAuthStore from '../store/authStore'
+import Dashboard from './Dashboard'
+import TopUps from './TopUps'
+import Orders from './Orders'
+import Transactions from './Transactions'
+import MyStore from './MyStore'
+import Profile from './Profile'
+import AdminPanel from './admin/AdminPanel'
 
-const NAV = [
-  { id: 'dashboard',    icon: '🏠', label: 'Dashboard' },
-  { id: 'topups',       icon: '💳', label: 'Top Ups' },
-  { id: 'orders',       icon: '📦', label: 'Orders' },
-  { id: 'transactions', icon: '💰', label: 'Transactions' },
-]
-const RESELLER_NAV = [{ id: 'mystore', icon: '🏪', label: 'My Store' }]
-const ADMIN_NAV    = [{ id: 'admin',   icon: '⚙️', label: 'Admin' }]
+export default function AppLayout() {
+  const navigate = useNavigate()
+  const [page, setPage] = useState('dashboard')
+  const [collapsed, setCollapsed] = useState(false)
+  const { open: cartOpen } = useCartStore()
+  const { isAdmin, loading, canAccessDashboard, profile } = useAuthStore()
 
-export default function Sidebar({ page, setPage, collapsed, setCollapsed }) {
-  const { profile, logout, isAdmin, isReseller } = useAuthStore()
-  const _isAdmin = isAdmin()
-  const _isReseller = isReseller()
+  // Check access - redirect customers away from dashboard
+  useEffect(() => {
+    if (!loading) {
+      if (!canAccessDashboard()) {
+        setTimeout(() => {
+          if (profile?.reseller_id) {
+            supabase
+              .from('stores')
+              .select('slug')
+              .eq('reseller_id', profile.reseller_id)
+              .single()
+              .then(({ data }) => {
+                if (data?.slug) {
+                  window.location.href = `/store/${data.slug}`
+                } else {
+                  window.location.href = '/store/access-denied'
+                }
+              })
+              .catch(() => {
+                window.location.href = '/store/access-denied'
+              })
+          } else {
+            window.location.href = '/store/access-denied'
+          }
+        }, 300)
+      }
+    }
+  }, [loading, profile])
 
-  const items = [
-    ...NAV,
-    ...(_isReseller || _isAdmin ? RESELLER_NAV : []),
-    { id: 'profile', icon: '👤', label: 'Profile' },
-    ...(_isAdmin ? ADMIN_NAV : []),
-  ]
+  // Responsive: collapse sidebar on mobile by default
+  useEffect(() => {
+    const check = () => setCollapsed(window.innerWidth < 768)
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
 
-  // Handle logout with redirect
-  const handleLogout = async () => {
-    await logout()
-    // The logout function in authStore now handles redirect
+  // Show loading while checking access
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <p className="mt-4 text-gray-500">Loading...</p>
+        </div>
+      </div>
+    )
   }
 
+  // If customer, don't render (will be redirected)
+  if (!canAccessDashboard()) {
+    return null
+  }
+
+  const leftPad = collapsed ? 'ml-16' : 'ml-60'
+
   return (
-    <aside className={cls(
-      'fixed left-0 top-0 h-screen flex flex-col transition-all duration-300 ease-in-out',
-      'bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 border-r border-white/5',
-      collapsed ? 'w-16' : 'w-60',
-      'z-50' // Changed from z-30 to z-50 to appear above WhatsApp button
-    )}>
-      {/* Logo */}
-      <div className="flex items-center gap-3 px-4 py-5 border-b border-white/10 min-h-[68px]">
-        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center text-lg flex-shrink-0 shadow-lg animate-float">
-          📡
-        </div>
-        {!collapsed && (
-          <div className="overflow-hidden">
-            <p className="font-bold text-white text-sm leading-tight">Donmac</p>
-            <p className="text-xs text-slate-400 leading-tight">Data Hub</p>
+    <div className="min-h-screen bg-gray-50 font-sans">
+      <Sidebar page={page} setPage={setPage} collapsed={collapsed} setCollapsed={setCollapsed} />
+
+      <div className={`${leftPad} transition-all duration-300 min-h-screen`}>
+        <Topbar page={page} setPage={setPage} collapsed={collapsed} />
+
+        <main className="pt-16 px-4 sm:px-6 pb-8 min-h-screen">
+          <div className="max-w-7xl mx-auto pt-5">
+            {page === 'dashboard'    && <Dashboard setPage={setPage} />}
+            {page === 'topups'       && <TopUps />}
+            {page === 'orders'       && <Orders />}
+            {page === 'transactions' && <Transactions />}
+            {page === 'mystore'      && <MyStore />}
+            {page === 'profile'      && <Profile />}
+            {page === 'admin'        && isAdmin() && <AdminPanel />}
           </div>
-        )}
+        </main>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 py-4 px-2 overflow-y-auto space-y-1">
-        {items.map(item => {
-          const active = page === item.id
-          return (
-            <button key={item.id} onClick={() => setPage(item.id)}
-              className={cls(
-                'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-150 text-sm font-medium group relative',
-                active
-                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/30'
-                  : 'text-slate-400 hover:bg-white/10 hover:text-white',
-                collapsed && 'justify-center'
-              )}>
-              <span className="text-lg flex-shrink-0">{item.icon}</span>
-              {!collapsed && <span className="truncate">{item.label}</span>}
-              {collapsed && (
-                <span className="absolute left-full ml-2 px-2 py-1 bg-slate-700 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 transition-opacity">
-                  {item.label}
-                </span>
-              )}
-              {active && !collapsed && (
-                <span className="ml-auto w-1.5 h-1.5 rounded-full bg-white opacity-80" />
-              )}
-            </button>
-          )
-        })}
-      </nav>
+      {/* Cart Drawer */}
+      {cartOpen && <CartDrawer />}
 
-      {/* User & Collapse */}
-      <div className="border-t border-white/10 p-2 space-y-1">
-        {!collapsed && (
-          <div className="px-3 py-2 rounded-xl bg-white/5 mb-1">
-            <p className="text-xs text-white font-semibold truncate">{profile?.name}</p>
-            <p className="text-xs text-slate-400 truncate capitalize">{profile?.role}</p>
-          </div>
-        )}
-        <button 
-          onClick={handleLogout}
-          className={cls('w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-red-400 hover:bg-red-500/10 hover:text-red-300 transition text-sm font-medium', collapsed && 'justify-center')}>
-          <span className="text-lg">🚪</span>
-          {!collapsed && 'Sign Out'}
+      {/* Floating WhatsApp - z-60 to appear above sidebar */}
+      <a href="https://wa.me/2330549358359" target="_blank" rel="noopener noreferrer"
+        className="fixed bottom-6 left-5 z-60 w-14 h-14 bg-green-500 hover:bg-green-600 rounded-full flex items-center justify-center shadow-xl shadow-green-500/40 transition-all hover:scale-110">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
+          <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+        </svg>
+      </a>
+
+      {/* Floating Cart Button when drawer closed */}
+      {!cartOpen && (
+        <button onClick={() => useCartStore.getState().setOpen(true)}
+          className="fixed bottom-6 right-5 z-40 w-14 h-14 bg-indigo-600 hover:bg-indigo-700 rounded-full flex items-center justify-center shadow-xl shadow-indigo-500/40 transition-all hover:scale-110">
+          <span className="text-2xl">🛒</span>
         </button>
-        <button onClick={() => setCollapsed(p => !p)}
-          className={cls('w-full flex items-center gap-3 px-3 py-2 rounded-xl text-slate-500 hover:bg-white/5 hover:text-slate-300 transition text-sm', collapsed && 'justify-center')}>
-          <span>{collapsed ? '▶' : '◀'}</span>
-          {!collapsed && <span className="text-xs">Collapse</span>}
-        </button>
-      </div>
-    </aside>
+      )}
+    </div>
   )
 }
