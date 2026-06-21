@@ -4,7 +4,6 @@ import { createClient } from '@supabase/supabase-js'
 const supabaseUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '').trim()
 const supabaseServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()
 
-// Defined explicitly as supabaseAdmin here:
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey)
 
 const BLOCKED_TOKENS = new Set([
@@ -50,21 +49,90 @@ function parseSMS(text) {
   return result
 }
 
+// Helper function to extract SMS text from any payload format
+function extractSmsText(body) {
+  // List of possible field names that might contain the SMS text
+  const possibleFields = [
+    'message', 'sms', 'text', 'body', 'Content', 'Body', 
+    'content', 'msg', 'payload', 'data', 'MESSAGE', 
+    'SMS', 'Text', 'Message', 'Body'
+  ]
+  
+  // Check each field
+  for (const field of possibleFields) {
+    if (body[field] && typeof body[field] === 'string' && body[field].length > 5) {
+      return body[field]
+    }
+  }
+  
+  // If body has a 'data' object, check inside it
+  if (body.data && typeof body.data === 'object') {
+    for (const field of possibleFields) {
+      if (body.data[field] && typeof body.data[field] === 'string' && body.data[field].length > 5) {
+        return body.data[field]
+      }
+    }
+  }
+  
+  // If body has a 'payload' object, check inside it
+  if (body.payload && typeof body.payload === 'object') {
+    for (const field of possibleFields) {
+      if (body.payload[field] && typeof body.payload[field] === 'string' && body.payload[field].length > 5) {
+        return body.payload[field]
+      }
+    }
+  }
+  
+  // If all else fails, try to find any string in the body that looks like an SMS
+  if (typeof body === 'object') {
+    for (const key of Object.keys(body)) {
+      if (typeof body[key] === 'string' && body[key].length > 20) {
+        // Check if it looks like an SMS (contains GHS, amount, or reference code)
+        if (body[key].match(/GHS|REF|MOMO|MTN|TELECEL|AIRTEL|TIGO/i)) {
+          return body[key]
+        }
+      }
+    }
+  }
+  
+  return ''
+}
+
 export default async function handler(req, res) {
-  if (req.method !== 'POST' && req.method !== 'GET') {
+  // Allow GET for testing
+  if (req.method === 'GET') {
+    return res.status(200).json({ 
+      success: true, 
+      message: 'Webhook endpoint is active. Send POST requests with SMS content.' 
+    })
+  }
+
+  if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method access denied' })
   }
 
   try {
-    const body = req.method === 'POST' ? req.body : req.query
-    const rawSms = body.message || body.sms || body.text || body.body || ''
+    const body = req.body
+    
+    // Log the incoming payload for debugging
+    console.log('📥 Webhook received:', JSON.stringify(body, null, 2))
+    
+    // Extract SMS text from any format
+    const rawSms = extractSmsText(body)
 
-    if (!rawSms.trim()) {
-      return res.status(400).json({ error: 'Payload body cannot be blank' })
+    if (!rawSms || !rawSms.trim()) {
+      console.log('❌ No SMS text found in payload')
+      return res.status(400).json({ 
+        error: 'Payload body cannot be blank',
+        received: body,
+        hint: 'Send SMS text in field: message, sms, text, body, Content, payload, or data'
+      })
     }
 
+    console.log('📝 SMS text extracted:', rawSms)
+
     const parsed = parseSMS(rawSms)
-    console.log('Processed Vector:', { txId: parsed.txId, amount: parsed.amount, targets: parsed.possibleRefs })
+    console.log('🔍 Parsed:', { txId: parsed.txId, amount: parsed.amount, refs: parsed.possibleRefs })
 
     if (parsed.txId) {
       const { data: existingTx } = await supabaseAdmin
@@ -75,7 +143,7 @@ export default async function handler(req, res) {
 
       if (existingTx) {
         if (existingTx.status === 'claimed') {
-          return res.status(200).json({ success: true, message: 'Transaction identity previously settled' })
+          return res.status(200).json({ success: true, message: 'Transaction already settled' })
         }
         if (existingTx.status === 'unclaimed' && parsed.possibleRefs.length === 0) {
           return res.status(200).json({ success: true, message: 'Unclaimed record logged' })
@@ -128,7 +196,7 @@ export default async function handler(req, res) {
           await supabaseAdmin.from('transactions').insert({
             user_id: targetUser,
             type: 'credit',
-            description: `Auto-topup via system web gateway. Ref token: [${token}]. Network Trx ID: ${parsed.txId || 'N/A'}`,
+            description: `Auto-topup via webhook. Ref: [${token}]. TxID: ${parsed.txId || 'N/A'}`,
             amount: parsed.amount,
             status: 'success'
           })
@@ -136,7 +204,7 @@ export default async function handler(req, res) {
           await supabaseAdmin.from('notifications').insert({
             user_id: targetUser,
             title: 'Wallet Credited! 💰',
-            message: `₵${parsed.amount.toFixed(2)} added to your wallet layout dynamically.`,
+            message: `₵${parsed.amount.toFixed(2)} added to your wallet.`,
             type: 'topup'
           })
 
@@ -167,7 +235,7 @@ export default async function handler(req, res) {
     })
 
   } catch (globalError) {
-    console.error('Fatal execution state drop:', globalError.message)
-    return res.status(500).json({ error: 'Internal pipeline system exception' })
+    console.error('Webhook error:', globalError.message)
+    return res.status(500).json({ error: 'Internal server error' })
   }
 }
