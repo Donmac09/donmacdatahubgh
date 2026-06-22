@@ -1,13 +1,14 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams } from 'react-router-dom'
-import { getStoreBySlug, getResellerPrices, getPackagesConfig } from '../lib/supabase'
+import { getStoreBySlug, getResellerPrices, getPackagesConfig, getNotifications, markNotifRead, subscribeNotifications } from '../lib/supabase'
 import { supabase } from '../lib/supabase'
 import useAuthStore from '../store/authStore'
 import useCartStore from '../store/cartStore'
 import { PACKAGES } from '../lib/packages'
-import { formatCurrency, formatDate, generateRef } from '../lib/utils'
+import { formatCurrency, formatDate, generateRef, timeAgo } from '../lib/utils'
 import { sounds } from '../lib/sounds'
 import { StatusBadge, NetworkBadge, Modal, Input, Card, Btn, Table, Td, Empty, DateFilters, StatCard } from '../components/ui'
+import { useTodayDateRange } from '../hooks/useTodayDateRange'
 import PackageCard from '../components/PackageCard'
 import BuyModal from '../components/BuyModal'
 import CartDrawer from '../components/CartDrawer'
@@ -136,24 +137,91 @@ function StoreDashboard({ store, resellerId, whatsapp }) {
   const [now, setNow] = useState(new Date())
   // Orders
   const [orders, setOrders] = useState([])
-  const [orderDateFrom, setOrderDateFrom] = useState('')
-  const [orderDateTo, setOrderDateTo] = useState('')
+  const { from: orderDateFrom, to: orderDateTo, setFrom: setOrderDateFrom, setTo: setOrderDateTo, resetToToday: resetOrderToToday } = useTodayDateRange()
   // TopUps
   const [topups, setTopups] = useState([])
-  const [topupDateFrom, setTopupDateFrom] = useState('')
-  const [topupDateTo, setTopupDateTo] = useState('')
+  const { from: topupDateFrom, to: topupDateTo, setFrom: setTopupDateFrom, setTo: setTopupDateTo, resetToToday: resetTopupToToday } = useTodayDateRange()
   const [showTopup, setShowTopup] = useState(false)
   const [showRef, setShowRef] = useState(false)
   const [showClaim, setShowClaim] = useState(false)
-  const [myRef] = useState(generateRef())
+  const [myRef, setMyRef] = useState('')
+  const [refLoading, setRefLoading] = useState(false)
+
+  useEffect(() => {
+    if (!profile?.id) return
+    setRefLoading(true)
+    supabase.rpc('get_or_create_reference_code', { p_user_id: profile.id })
+      .then(({ data, error }) => {
+        if (!error && data) setMyRef(data)
+        else setMyRef(generateRef())
+      })
+      .finally(() => setRefLoading(false))
+  }, [profile?.id])
   const [claimTxId, setClaimTxId] = useState('')
   const [claimLoading, setClaimLoading] = useState(false)
   // Transactions
   const [txs, setTxs] = useState([])
-  const [txDateFrom, setTxDateFrom] = useState('')
-  const [txDateTo, setTxDateTo] = useState('')
+  const { from: txDateFrom, to: txDateTo, setFrom: setTxDateFrom, setTo: setTxDateTo, resetToToday: resetTxToToday } = useTodayDateRange()
   // Profile
   const [pwForm, setPwForm] = useState({ current: '', newPw: '', confirm: '' })
+
+  // ── Notifications ────────────────────────────────────────────
+  const [notifs, setNotifs] = useState([])
+  const [showNotifs, setShowNotifs] = useState(false)
+  const notifRef = useRef(null)
+
+  useEffect(() => {
+    if (!profile?.id) return
+    loadNotifs()
+
+    const sub = subscribeNotifications(profile.id, (payload) => {
+      const n = payload.new
+      setNotifs(prev => [n, ...prev])
+      sounds.notification()
+      setShowNotifs(true)
+    })
+
+    return () => {
+      supabase.removeChannel(sub)
+    }
+  }, [profile?.id])
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (notifRef.current && !notifRef.current.contains(e.target)) setShowNotifs(false)
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  async function loadNotifs() {
+    try {
+      const data = await getNotifications(profile.id)
+      setNotifs(data)
+    } catch {}
+  }
+
+  async function handleMarkRead(id) {
+    setNotifs(prev => prev.map(n => n.id === id ? { ...n, read: true } : n))
+    try {
+      await markNotifRead(id)
+    } catch {
+      setNotifs(prev => prev.map(n => n.id === id ? { ...n, read: false } : n))
+    }
+  }
+
+  async function handleMarkAllRead() {
+    const unreadIds = notifs.filter(n => !n.read).map(n => n.id)
+    if (unreadIds.length === 0) return
+    setNotifs(prev => prev.map(n => ({ ...n, read: true })))
+    try {
+      await Promise.all(unreadIds.map(id => markNotifRead(id)))
+    } catch {
+      loadNotifs()
+    }
+  }
+
+  const unreadCount = notifs.filter(n => !n.read).length
 
   useEffect(() => {
     loadData()
@@ -292,6 +360,48 @@ function StoreDashboard({ store, resellerId, whatsapp }) {
           </div>
           <div className="flex items-center gap-2">
             <span className="hidden sm:block text-sm font-bold text-emerald-600 bg-emerald-50 px-3 py-1 rounded-xl">{formatCurrency(profile?.balance || 0)}</span>
+
+            {/* Notifications */}
+            <div className="relative" ref={notifRef}>
+              <button onClick={() => setShowNotifs(p => !p)} className="relative p-2 hover:bg-gray-100 rounded-xl transition">
+                <span className="text-xl">🔔</span>
+                {unreadCount > 0 && (
+                  <span className="absolute top-0.5 right-0.5 bg-red-500 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
+              </button>
+
+              {showNotifs && (
+                <div className="absolute right-0 top-full mt-2 w-[calc(100vw-2rem)] max-w-80 bg-white rounded-2xl shadow-xl border border-gray-100 z-50 max-h-96 flex flex-col overflow-hidden animate-slide-in-right">
+                  <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                    <p className="font-semibold text-sm text-gray-900">Notifications</p>
+                    {unreadCount > 0 && (
+                      <button onClick={handleMarkAllRead} className="text-xs text-indigo-600 hover:underline">Mark all read</button>
+                    )}
+                  </div>
+                  <div className="overflow-y-auto flex-1">
+                    {notifs.length === 0 ? (
+                      <p className="text-center py-8 text-gray-400 text-sm">No notifications yet</p>
+                    ) : notifs.map(n => (
+                      <div key={n.id} onClick={() => handleMarkRead(n.id)}
+                        className={`px-4 py-3 border-b border-gray-50 cursor-pointer hover:bg-gray-50 transition ${!n.read ? 'bg-indigo-50/50' : ''}`}>
+                        <div className="flex items-start gap-2">
+                          <span className="text-sm">{n.type === 'order' ? '📦' : n.type === 'topup' ? '💳' : '💰'}</span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-gray-800 truncate">{n.title}</p>
+                            <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{n.message}</p>
+                            <p className="text-xs text-gray-400 mt-1">{timeAgo(n.created_at)}</p>
+                          </div>
+                          {!n.read && <span className="w-2 h-2 bg-indigo-500 rounded-full flex-shrink-0 mt-1" />}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
             <button onClick={() => setCartOpen(true)} className="relative p-2 hover:bg-gray-100 rounded-xl">
               <span className="text-xl">🛒</span>
               {cartItems.length > 0 && <span className="absolute top-0.5 right-0.5 bg-red-500 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center">{cartItems.length}</span>}
@@ -343,7 +453,7 @@ function StoreDashboard({ store, resellerId, whatsapp }) {
                     {Object.entries(PACKAGES).map(([key, group]) => (
                       <PackageCard key={key} groupKey={key} group={group} pkgConfig={pkgConfig}
                         resellerPrices={resellerPrices}
-                        onBuy={(gk, item, price) => setBuyState({ groupKey: gk, item, price })} />
+                        onBuy={(gk, item, price, costPrice) => setBuyState({ groupKey: gk, item, price, costPrice })} />
                     ))}
                   </div>
                 </div>
@@ -355,7 +465,7 @@ function StoreDashboard({ store, resellerId, whatsapp }) {
               <div className="space-y-5 animate-fade-in">
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <h2 className="text-xl font-bold text-gray-900">My Orders</h2>
-                  <DateFilters from={orderDateFrom} to={orderDateTo} onFrom={setOrderDateFrom} onTo={setOrderDateTo} />
+                  <DateFilters from={orderDateFrom} to={orderDateTo} onFrom={setOrderDateFrom} onTo={setOrderDateTo} onReset={resetOrderToToday} />
                 </div>
                 <Card className="p-0 overflow-hidden">
                   {filteredOrders.length === 0 ? <Empty icon="📦" title="No orders yet" description="Buy a data package to get started" /> : (
@@ -385,7 +495,7 @@ function StoreDashboard({ store, resellerId, whatsapp }) {
                   <div className="flex gap-2 flex-wrap">
                     <Btn onClick={() => setShowTopup(true)} variant="success" size="sm">💳 Top Up</Btn>
                     <Btn onClick={() => setShowClaim(true)} variant="secondary" size="sm">🧾 Claim TxID</Btn>
-                    <DateFilters from={topupDateFrom} to={topupDateTo} onFrom={setTopupDateFrom} onTo={setTopupDateTo} />
+                    <DateFilters from={topupDateFrom} to={topupDateTo} onFrom={setTopupDateFrom} onTo={setTopupDateTo} onReset={resetTopupToToday} />
                   </div>
                 </div>
                 <Card className="p-0 overflow-hidden">
@@ -411,7 +521,7 @@ function StoreDashboard({ store, resellerId, whatsapp }) {
               <div className="space-y-5 animate-fade-in">
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <h2 className="text-xl font-bold text-gray-900">Transactions</h2>
-                  <DateFilters from={txDateFrom} to={txDateTo} onFrom={setTxDateFrom} onTo={setTxDateTo} />
+                  <DateFilters from={txDateFrom} to={txDateTo} onFrom={setTxDateFrom} onTo={setTxDateTo} onReset={resetTxToToday} />
                 </div>
                 <Card className="p-0 overflow-hidden">
                   {filteredTxs.length === 0 ? <Empty icon="💰" title="No transactions yet" /> : (
