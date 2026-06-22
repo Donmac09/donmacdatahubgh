@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
 import Sidebar from '../components/Sidebar'
 import Topbar from '../components/Topbar'
 import CartDrawer from '../components/CartDrawer'
@@ -14,79 +13,52 @@ import Profile from './Profile'
 import AdminPanel from './admin/AdminPanel'
 
 export default function AppLayout() {
-  const navigate = useNavigate()
   const [page, setPage] = useState('dashboard')
   const [collapsed, setCollapsed] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const [announcementVisible, setAnnouncementVisible] = useState(false)
   const { open: cartOpen } = useCartStore()
-  const { isAdmin, loading, canAccessDashboard, profile } = useAuthStore()
+  const { isAdmin } = useAuthStore()
 
-  // Check access - redirect customers away from dashboard
+  // Close mobile drawer automatically if window is resized up to desktop
   useEffect(() => {
-    if (!loading) {
-      if (!canAccessDashboard()) {
-        // Use setTimeout to allow state to settle
-        setTimeout(() => {
-          if (profile?.reseller_id) {
-            // Try to get store slug and redirect
-            supabase
-              .from('stores')
-              .select('slug')
-              .eq('reseller_id', profile.reseller_id)
-              .single()
-              .then(({ data }) => {
-                if (data?.slug) {
-                  window.location.href = `/store/${data.slug}`
-                } else {
-                  window.location.href = '/store/access-denied'
-                }
-              })
-              .catch(() => {
-                window.location.href = '/store/access-denied'
-              })
-          } else {
-            window.location.href = '/store/access-denied'
-          }
-        }, 300)
-      }
+    function handleResize() {
+      if (window.innerWidth >= 1024) setMobileOpen(false)
     }
-  }, [loading, profile])
-
-  // Responsive: collapse sidebar on mobile by default
-  useEffect(() => {
-    const check = () => setCollapsed(window.innerWidth < 768)
-    check()
-    window.addEventListener('resize', check)
-    return () => window.removeEventListener('resize', check)
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
   }, [])
 
-  // Show loading while checking access
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
-          <p className="mt-4 text-gray-500">Loading...</p>
-        </div>
-      </div>
-    )
-  }
-
-  // If customer, don't render (will be redirected)
-  if (!canAccessDashboard()) {
-    return null
-  }
-
-  const leftPad = collapsed ? 'ml-16' : 'ml-60'
+  // Desktop-only left offset — mobile/tablet sidebar floats over content (off-canvas)
+  const leftPad = collapsed ? 'lg:ml-16' : 'lg:ml-60'
+  // Top padding tracks Topbar's ACTUAL rendered banner state (via callback),
+  // so content never hides under the header AND never reserves stale empty
+  // space after the announcement is dismissed.
+  const topPad = announcementVisible ? 'pt-[104px]' : 'pt-16'
 
   return (
     <div className="min-h-screen bg-gray-50 font-sans">
-      <Sidebar page={page} setPage={setPage} collapsed={collapsed} setCollapsed={setCollapsed} />
+      <Sidebar
+        page={page}
+        setPage={setPage}
+        collapsed={collapsed}
+        setCollapsed={setCollapsed}
+        mobileOpen={mobileOpen}
+        setMobileOpen={setMobileOpen}
+      />
 
-      <div className={`${leftPad} transition-all duration-300 min-h-screen`}>
-        <Topbar page={page} setPage={setPage} collapsed={collapsed} />
+      <div className={`${leftPad} transition-all duration-300 min-h-screen w-full`}>
+        <Topbar
+          page={page}
+          setPage={setPage}
+          collapsed={collapsed}
+          onOpenMobileMenu={() => setMobileOpen(true)}
+          onAnnouncementVisibilityChange={setAnnouncementVisible}
+        />
 
-        <main className="pt-16 px-4 sm:px-6 pb-8 min-h-screen">
-          <div className="max-w-7xl mx-auto pt-5">
+        {/* Page Content — top padding dynamically accounts for the announcement banner */}
+        <main className={`${topPad} px-4 sm:px-6 lg:px-8 pb-8 min-h-screen w-full transition-all duration-300`}>
+          <div className="w-full max-w-6xl mx-auto pt-5">
             {page === 'dashboard'    && <Dashboard setPage={setPage} />}
             {page === 'topups'       && <TopUps />}
             {page === 'orders'       && <Orders />}
@@ -98,8 +70,10 @@ export default function AppLayout() {
         </main>
       </div>
 
+      {/* Cart Drawer */}
       {cartOpen && <CartDrawer />}
 
+      {/* Floating WhatsApp */}
       <a href="https://wa.me/2330549358359" target="_blank" rel="noopener noreferrer"
         className="fixed bottom-6 left-5 z-40 w-14 h-14 bg-green-500 hover:bg-green-600 rounded-full flex items-center justify-center shadow-xl shadow-green-500/40 transition-all hover:scale-110">
         <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
@@ -107,6 +81,7 @@ export default function AppLayout() {
         </svg>
       </a>
 
+      {/* Floating Cart Button when drawer closed */}
       {!cartOpen && (
         <button onClick={() => useCartStore.getState().setOpen(true)}
           className="fixed bottom-6 right-5 z-40 w-14 h-14 bg-indigo-600 hover:bg-indigo-700 rounded-full flex items-center justify-center shadow-xl shadow-indigo-500/40 transition-all hover:scale-110">
