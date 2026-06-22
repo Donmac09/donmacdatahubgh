@@ -1,42 +1,191 @@
-// components/Layout.jsx
-import { useState } from 'react'
-import Sidebar from './Sidebar'
-import Topbar from './Topbar'
-import { cls } from '../lib/utils'
+// components/Topbar.jsx
+import { useState, useEffect, useRef } from 'react'
+import useAuthStore from '../store/authStore'
+import useCartStore from '../store/cartStore'
+import { supabase, getNotifications, markNotifRead, getAnnouncements, subscribeNotifications, subscribeAnnouncements } from '../lib/supabase'
+import { formatCurrency, timeAgo } from '../lib/utils'
+import { sounds } from '../lib/sounds'
 
-export default function Layout({ children }) {
-  const [mobileOpen, setMobileOpen] = useState(false)
-  const [collapsed, setCollapsed] = useState(false)
-  const [page, setPage] = useState('dashboard')
+export default function Topbar({ page, setPage, collapsed, onAnnouncementVisibilityChange }) {
+  const { profile } = useAuthStore()
+  const { items: cartItems, setOpen: setCartOpen } = useCartStore()
+  const [notifs, setNotifs] = useState([])
+  const [showNotifs, setShowNotifs] = useState(false)
+  const [announcement, setAnnouncement] = useState(null)
+  const [showAnnouncement, setShowAnnouncement] = useState(true)
+  const notifRef = useRef(null)
+
+  useEffect(() => {
+    onAnnouncementVisibilityChange?.(Boolean(announcement) && showAnnouncement)
+  }, [announcement, showAnnouncement])
+
+  useEffect(() => {
+    if (!profile?.id) return
+    loadNotifs()
+    loadAnnouncement()
+
+    const sub = subscribeNotifications(profile.id, (payload) => {
+      const n = payload.new
+      setNotifs(prev => [n, ...prev])
+      sounds.notification()
+      setShowNotifs(true)
+    })
+    const annSub = subscribeAnnouncements(() => loadAnnouncement())
+
+    return () => {
+      supabase.removeChannel(sub)
+      supabase.removeChannel(annSub)
+    }
+  }, [profile?.id])
+
+  useEffect(() => {
+    function handleClick(e) {
+      if (notifRef.current && !notifRef.current.contains(e.target)) setShowNotifs(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
+
+  async function handleMarkRead(id) {
+    setNotifs(prev => prev.map(n => n.id === id ? { ...n, read: true } : n))
+    try {
+      await markNotifRead(id)
+    } catch {
+      setNotifs(prev => prev.map(n => n.id === id ? { ...n, read: false } : n))
+    }
+  }
+
+  async function handleMarkAllRead() {
+    const unreadIds = notifs.filter(n => !n.read).map(n => n.id)
+    if (unreadIds.length === 0) return
+    setNotifs(prev => prev.map(n => ({ ...n, read: true })))
+    try {
+      await Promise.all(unreadIds.map(id => markNotifRead(id)))
+    } catch {
+      loadNotifs()
+    }
+  }
+
+  async function loadNotifs() {
+    try {
+      const data = await getNotifications(profile.id)
+      setNotifs(data)
+    } catch {}
+  }
+
+  async function loadAnnouncement() {
+    try {
+      const anns = await getAnnouncements(true)
+      setAnnouncement(anns[0] || null)
+    } catch {}
+  }
+
+  const unread = notifs.filter(n => !n.read).length
+  const leftPad = collapsed ? 'lg:left-16' : 'lg:left-60'
+
+  const pageTitles = {
+    admin: '⚙️ Admin Panel',
+    mystore: '🏪 My Store',
+    dashboard: '🏠 Dashboard',
+    topups: '💳 Top Ups',
+    orders: '📦 Orders',
+    transactions: '💰 Transactions',
+    profile: '👤 Profile',
+  }
+
+  const annColors = {
+    info:    'bg-blue-50 border-blue-200 text-blue-800',
+    warning: 'bg-amber-50 border-amber-200 text-amber-800',
+    success: 'bg-green-50 border-green-200 text-green-800',
+    error:   'bg-red-50 border-red-200 text-red-800',
+  }
 
   return (
-    <div className="min-h-screen bg-slate-950">
-      <Sidebar
-        page={page}
-        setPage={setPage}
-        collapsed={collapsed}
-        setCollapsed={setCollapsed}
-        mobileOpen={mobileOpen}
-        setMobileOpen={setMobileOpen}
-      />
-
-      <Topbar
-        page={page}
-        setPage={setPage}
-        collapsed={collapsed}
-        // ❌ Removed: onAnnouncementVisibilityChange
-      />
-
-      <main className={cls(
-        'transition-all duration-300 min-h-screen',
-        'lg:pl-60',
-        collapsed && 'lg:pl-16',
-        'pt-16' // Always 16 since no announcement
-      )}>
-        <div className="p-4 md:p-6 lg:p-8">
-          {children}
+    <div>
+      {/* Announcement Banner */}
+      {announcement && showAnnouncement && (
+        <div className={`fixed top-0 left-0 ${leftPad} right-0 z-20 transition-all duration-300`}>
+          <div className={`flex items-center gap-3 px-4 sm:px-6 py-2.5 border-b text-sm font-medium ${annColors[announcement.type] || annColors.info}`}>
+            <span>📢</span>
+            <span className="flex-1 truncate">{announcement.message}</span>
+            <button onClick={() => setShowAnnouncement(false)} className="opacity-60 hover:opacity-100 font-bold text-lg leading-none flex-shrink-0">&times;</button>
+          </div>
         </div>
-      </main>
+      )}
+
+      {/* Topbar - No Hamburger */}
+      <header className={`fixed left-0 ${leftPad} right-0 z-20 transition-all duration-300 ${announcement && showAnnouncement ? 'top-[42px]' : 'top-0'} bg-white/95 backdrop-blur-md border-b border-gray-100 h-16 flex items-center justify-between px-3 sm:px-6 shadow-sm`}>
+        {/* Left: Page Title only */}
+        <div className="flex items-center gap-2 min-w-0">
+          <h1 className="text-base sm:text-lg font-bold text-gray-900 truncate">
+            {pageTitles[page] || page}
+          </h1>
+        </div>
+
+        {/* Right side */}
+        <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
+          {/* Balance */}
+          <div className="hidden sm:flex items-center gap-2 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-100 px-4 py-2 rounded-xl">
+            <span className="text-emerald-600 font-bold text-sm">{formatCurrency(profile?.balance || 0)}</span>
+          </div>
+
+          {/* Cart */}
+          <button onClick={() => setCartOpen(true)} className="relative p-2 sm:p-2.5 hover:bg-gray-100 rounded-xl transition">
+            <span className="text-xl">🛒</span>
+            {cartItems.length > 0 && (
+              <span className="absolute top-0.5 right-0.5 sm:top-1 sm:right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center animate-pulse-glow">
+                {cartItems.length}
+              </span>
+            )}
+          </button>
+
+          {/* Notifications */}
+          <div className="relative" ref={notifRef}>
+            <button onClick={() => setShowNotifs(p => !p)} className="relative p-2 sm:p-2.5 hover:bg-gray-100 rounded-xl transition">
+              <span className="text-xl">🔔</span>
+              {unread > 0 && (
+                <span className="absolute top-0.5 right-0.5 sm:top-1 sm:right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                  {unread > 9 ? '9+' : unread}
+                </span>
+              )}
+            </button>
+
+            {showNotifs && (
+              <div className="absolute right-0 top-full mt-2 w-[calc(100vw-2rem)] max-w-80 bg-white rounded-2xl shadow-xl border border-gray-100 z-50 max-h-96 flex flex-col overflow-hidden animate-slide-in-right">
+                <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                  <p className="font-semibold text-sm text-gray-900">Notifications</p>
+                  {unread > 0 && <button onClick={handleMarkAllRead} className="text-xs text-indigo-600 hover:underline">Mark all read</button>}
+                </div>
+                <div className="overflow-y-auto flex-1">
+                  {notifs.length === 0 ? (
+                    <p className="text-center py-8 text-gray-400 text-sm">No notifications yet</p>
+                  ) : notifs.map(n => (
+                    <div key={n.id} onClick={() => handleMarkRead(n.id)}
+                      className={`px-4 py-3 border-b border-gray-50 cursor-pointer hover:bg-gray-50 transition ${!n.read ? 'bg-indigo-50/50' : ''}`}>
+                      <div className="flex items-start gap-2">
+                        <span className="text-sm">{n.type === 'order' ? '📦' : n.type === 'topup' ? '💳' : '💰'}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-800 truncate">{n.title}</p>
+                          <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{n.message}</p>
+                          <p className="text-xs text-gray-400 mt-1">{timeAgo(n.created_at)}</p>
+                        </div>
+                        {!n.read && <span className="w-2 h-2 bg-indigo-500 rounded-full flex-shrink-0 mt-1" />}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Avatar */}
+          <button onClick={() => setPage('profile')} className="flex items-center gap-2 hover:opacity-80 transition">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm shadow-sm">
+              {profile?.name?.charAt(0)?.toUpperCase() || '?'}
+            </div>
+          </button>
+        </div>
+      </header>
     </div>
   )
 }
