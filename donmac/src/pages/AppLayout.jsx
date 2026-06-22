@@ -1,4 +1,3 @@
-// AppLayout.jsx
 import { useState, useEffect } from 'react'
 import Sidebar from '../components/Sidebar'
 import Topbar from '../components/Topbar'
@@ -17,6 +16,7 @@ export default function AppLayout() {
   const [page, setPage] = useState('dashboard')
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [announcementVisible, setAnnouncementVisible] = useState(false)
   const { open: cartOpen } = useCartStore()
   const { isAdmin } = useAuthStore()
 
@@ -31,8 +31,10 @@ export default function AppLayout() {
 
   // Desktop-only left offset — mobile/tablet sidebar floats over content (off-canvas)
   const leftPad = collapsed ? 'lg:ml-16' : 'lg:ml-60'
-  // Top padding - always pt-16 since announcement is removed from Topbar
-  const topPad = 'pt-16'
+  // Top padding tracks Topbar's ACTUAL rendered banner state (via callback),
+  // so content never hides under the header AND never reserves stale empty
+  // space after the announcement is dismissed.
+  const topPad = announcementVisible ? 'pt-[104px]' : 'pt-16'
 
   return (
     <div className="min-h-screen bg-gray-50 font-sans">
@@ -51,10 +53,10 @@ export default function AppLayout() {
           setPage={setPage}
           collapsed={collapsed}
           onOpenMobileMenu={() => setMobileOpen(true)}
-          // ✅ REMOVED: onAnnouncementVisibilityChange
+          onAnnouncementVisibilityChange={setAnnouncementVisible}
         />
 
-        {/* Page Content — top padding is always pt-16 */}
+        {/* Page Content — top padding dynamically accounts for the announcement banner */}
         <main className={`${topPad} px-4 sm:px-6 lg:px-8 pb-8 min-h-screen w-full transition-all duration-300`}>
           <div className="w-full max-w-6xl mx-auto pt-5">
             {page === 'dashboard'    && <Dashboard setPage={setPage} />}
