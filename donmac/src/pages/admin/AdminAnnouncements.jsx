@@ -1,6 +1,6 @@
 // pages/Dashboard.jsx
 import { useState, useEffect } from 'react'
-import useAuthStore from '../store/authStore'
+import useAuthStore from '../../store/authStore'
 import { PACKAGES } from '../lib/packages'
 import { getPackagesConfig, getResellerPrices, getAnnouncements } from '../lib/supabase'
 import { formatCurrency, generateRef } from '../lib/utils'
