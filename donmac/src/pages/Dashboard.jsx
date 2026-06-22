@@ -19,7 +19,19 @@ export default function Dashboard({ setPage }) {
   const [showTopup, setShowTopup] = useState(false)
   const [showRef, setShowRef] = useState(false)
   const [showClaim, setShowClaim] = useState(false)
-  const [myRef] = useState(generateRef())
+  const [myRef, setMyRef] = useState('')
+  const [refLoading, setRefLoading] = useState(false)
+
+  useEffect(() => {
+    if (!profile?.id) return
+    setRefLoading(true)
+    supabase.rpc('get_or_create_reference_code', { p_user_id: profile.id })
+      .then(({ data, error }) => {
+        if (!error && data) setMyRef(data)
+        else setMyRef(generateRef()) // fallback so UI never breaks
+      })
+      .finally(() => setRefLoading(false))
+  }, [profile?.id])
   const [claimTxId, setClaimTxId] = useState('')
   const [claimLoading, setClaimLoading] = useState(false)
   const [orders, setOrders] = useState([])
@@ -31,14 +43,16 @@ export default function Dashboard({ setPage }) {
   }, [])
 
   useEffect(() => {
-  loadConfig()
-  loadRecentOrders()
-  getAnnouncements(true).then(a => setAnnouncement(a[0] || null)).catch(() => {})
-}, [profile])
+    loadConfig()
+    loadRecentOrders()
+    getAnnouncements(true).then(a => setAnnouncement(a[0] || null)).catch(() => {})
+  }, [profile])
+
   async function loadConfig() {
     try {
       const cfg = await getPackagesConfig()
       setPkgConfig(cfg)
+      // Load reseller prices if customer has a reseller
       const resellerId = profile?.reseller_id || profile?.reseller?.id
       if (resellerId) {
         const prices = await getResellerPrices(resellerId)
@@ -60,13 +74,16 @@ export default function Dashboard({ setPage }) {
     if (!claimTxId.trim()) { toast.error('Enter transaction ID'); return }
     setClaimLoading(true)
     try {
+      // Find unclaimed topup with this txId
       const { data: topup, error } = await supabase.from('topups')
         .select('*').eq('transaction_id', claimTxId.trim()).single()
       if (error || !topup) throw new Error('Transaction ID not found. Contact admin.')
       if (topup.status === 'claimed') throw new Error('This transaction has already been claimed.')
 
+      // Claim it
       await supabase.from('topups').update({ status: 'claimed', claimed_by: profile.id, user_id: profile.id }).eq('id', topup.id)
 
+      // Credit wallet
       const newBal = (profile.balance || 0) + topup.amount
       await supabase.from('profiles').update({ balance: newBal }).eq('id', profile.id)
       await supabase.from('transactions').insert({
@@ -98,93 +115,76 @@ export default function Dashboard({ setPage }) {
   const timeStr = now.toLocaleTimeString('en-GH', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-6 py-4 animate-fade-in bg-slate-50/50 min-h-screen">
-      
-      {/* Dynamic Announcement Banner */}
-      {announcement && (
-        <div className="bg-gradient-to-r from-amber-500 to-orange-600 text-white px-4 py-3 rounded-xl shadow-sm flex items-center gap-3 animate-pulse">
-          <span className="text-xl">📢</span>
-          <div className="text-sm font-medium">{announcement.message || announcement}</div>
-        </div>
-      )}
+    <div className="space-y-6 animate-fade-in">
+      {/* Hero Banner */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-indigo-900 to-slate-900 p-6 sm:p-8 text-white">
+        {/* Decorative circles */}
+        <div className="absolute -right-16 -top-16 w-64 h-64 rounded-full bg-indigo-500/10 pointer-events-none" />
+        <div className="absolute -right-4 bottom-0 w-40 h-40 rounded-full bg-purple-500/10 pointer-events-none" />
+        <div className="absolute left-1/2 top-0 w-24 h-24 rounded-full bg-yellow-400/10 pointer-events-none" />
 
-      {/* Hero Header Section */}
-      <div className="relative overflow-hidden rounded-2xl bg-slate-900 border border-slate-800 p-6 sm:p-8 text-white shadow-xl shadow-slate-950/20">
-        <div className="absolute -right-10 -top-10 w-72 h-72 rounded-full bg-indigo-500/10 blur-3xl pointer-events-none" />
-        <div className="absolute -right-20 bottom-0 w-52 h-52 rounded-full bg-purple-500/10 blur-2xl pointer-events-none" />
-        
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 text-indigo-400 text-xs font-semibold uppercase tracking-wider">
-              <span>{dateStr}</span>
-              <span className="text-slate-600">•</span>
-              <span className="font-mono text-indigo-300">{timeStr}</span>
-            </div>
-            <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-              {greeting()}, <span className="bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">{profile?.name?.split(' ')[0] || 'User'}</span>! 👋
-            </h2>
-            <p className="text-slate-400 text-sm">Manage your premium packages and data balances layout effortlessly.</p>
+        <div className="relative z-10 flex flex-col sm:flex-row sm:items-end justify-between gap-6">
+          <div>
+            <p className="text-indigo-300 text-sm font-medium mb-1">{dateStr}</p>
+            <h2 className="text-2xl sm:text-3xl font-bold mb-1">{greeting()}, {profile?.name?.split(' ')[0]}! 👋</h2>
+            <p className="text-slate-400 text-sm">Welcome back to Donmac Data Hub</p>
+            <p className="text-indigo-200 font-mono text-base mt-2">{timeStr}</p>
           </div>
-
-          <div className="bg-slate-800/60 backdrop-blur-md border border-slate-700/50 rounded-xl p-4 min-w-[240px] flex flex-col items-start md:items-end shadow-inner">
-            <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-1">Available Balance</p>
-            <p className="text-3xl sm:text-4xl font-black tracking-tight text-emerald-400 font-mono">
-              {formatCurrency(profile?.balance || 0)}
-            </p>
+          <div className="flex flex-col items-start sm:items-end gap-1">
+            <p className="text-slate-400 text-xs font-medium uppercase tracking-wider">Wallet Balance</p>
+            <p className="text-4xl font-black text-white">{formatCurrency(profile?.balance || 0)}</p>
           </div>
         </div>
       </div>
 
-      {/* Grid Stats - Wallet Balance, Account Level, Gateway Connection */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* Stat Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <StatCard icon="💰" label="Wallet Balance" value={formatCurrency(profile?.balance || 0)} color="indigo" />
-        <StatCard 
-          icon="🛡️" 
-          label="Account Level" 
-          value={profile?.role ? profile.role.toUpperCase() : 'CUSTOMER'} 
-          color={profile?.role === 'reseller' ? 'purple' : 'emerald'} 
-        />
-        <StatCard 
-          icon="⚡" 
-          label="Gateway Connection" 
-          value={profile?.status === 'blocked' ? 'Suspended' : 'Operational'} 
-          color={profile?.status === 'blocked' ? 'red' : 'emerald'} 
-        />
+        <StatCard icon="📦" label="Total Orders" value={orders.length} color="amber" />
+        <StatCard icon="💳" label="Top Ups" value={profile?.role || '—'} sub="Account type" color="emerald" />
+        <StatCard icon="📊" label="Account Status" value={profile?.status === 'blocked' ? 'Blocked' : 'Active'} color={profile?.status === 'blocked' ? 'red' : 'emerald'} />
       </div>
 
-      {/* System Control Actions - Removed: Purchase Logs, Ledger Audits, Load History */}
-      <Card className="p-6 bg-white border border-slate-100 shadow-sm rounded-2xl">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-bold text-slate-800 text-xs uppercase tracking-widest">System Control & Operations</h3>
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping"></span>
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+      {/* Action Buttons */}
+      <Card className="p-5">
+        <h3 className="font-bold text-gray-800 mb-4 text-sm uppercase tracking-wider">Quick Actions</h3>
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
           <button onClick={() => setShowTopup(true)}
-            className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-slate-50 border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50/30 transition-all duration-200 group shadow-sm">
-            <span className="text-xl group-hover:scale-110 transition-transform bg-white p-2 rounded-lg shadow-sm">💳</span>
-            <span className="text-xs font-bold text-slate-700">Top Up Wallet</span>
+            className="flex flex-col items-center gap-2 p-4 rounded-xl bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-100 hover:shadow-md transition group">
+            <span className="text-2xl group-hover:scale-110 transition-transform">💳</span>
+            <span className="text-sm font-semibold text-emerald-700">Top Up</span>
           </button>
-
           <button onClick={() => setShowRef(true)}
-            className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-slate-50 border border-slate-100 hover:border-purple-200 hover:bg-purple-50/30 transition-all duration-200 group shadow-sm">
-            <span className="text-xl group-hover:scale-110 transition-transform bg-white p-2 rounded-lg shadow-sm">🔑</span>
-            <span className="text-xs font-bold text-slate-700">Reference ID</span>
+            className="flex flex-col items-center gap-2 p-4 rounded-xl bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100 hover:shadow-md transition group">
+            <span className="text-2xl group-hover:scale-110 transition-transform">🔑</span>
+            <span className="text-sm font-semibold text-indigo-700">Reference Code</span>
           </button>
-
           <button onClick={() => setShowClaim(true)}
-            className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-slate-50 border border-slate-100 hover:border-amber-200 hover:bg-amber-50/30 transition-all duration-200 group shadow-sm">
-            <span className="text-xl group-hover:scale-110 transition-transform bg-white p-2 rounded-lg shadow-sm">🧾</span>
-            <span className="text-xs font-bold text-slate-700">Claim Token</span>
+            className="flex flex-col items-center gap-2 p-4 rounded-xl bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-100 hover:shadow-md transition group">
+            <span className="text-2xl group-hover:scale-110 transition-transform">🧾</span>
+            <span className="text-sm font-semibold text-amber-700">Claim with TxID</span>
+          </button>
+          <button onClick={() => setPage('orders')}
+            className="flex flex-col items-center gap-2 p-4 rounded-xl bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100 hover:shadow-md transition group">
+            <span className="text-2xl group-hover:scale-110 transition-transform">📦</span>
+            <span className="text-sm font-semibold text-blue-700">My Orders</span>
+          </button>
+          <button onClick={() => setPage('transactions')}
+            className="flex flex-col items-center gap-2 p-4 rounded-xl bg-gradient-to-br from-purple-50 to-pink-50 border border-purple-100 hover:shadow-md transition group">
+            <span className="text-2xl group-hover:scale-110 transition-transform">💰</span>
+            <span className="text-sm font-semibold text-purple-700">Transactions</span>
+          </button>
+          <button onClick={() => setPage('topups')}
+            className="flex flex-col items-center gap-2 p-4 rounded-xl bg-gradient-to-br from-rose-50 to-pink-50 border border-rose-100 hover:shadow-md transition group">
+            <span className="text-2xl group-hover:scale-110 transition-transform">📜</span>
+            <span className="text-sm font-semibold text-rose-700">Top Up History</span>
           </button>
         </div>
       </Card>
 
-      {/* Packages - Full width, removed Live Activity Feeds sidebar */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between pb-2 border-b border-slate-200/60">
-          <h3 className="font-extrabold text-slate-900 text-lg">Product Rate Packages</h3>
-          <span className="text-xs text-slate-500 font-medium">Updated live</span>
-        </div>
+      {/* Packages */}
+      <div>
+        <h3 className="font-bold text-gray-900 text-lg mb-4">Available Packages</h3>
         <div className="space-y-4">
           {Object.entries(PACKAGES).map(([key, group]) => (
             <PackageCard
@@ -193,58 +193,58 @@ export default function Dashboard({ setPage }) {
               group={group}
               pkgConfig={pkgConfig}
               resellerPrices={resellerPrices}
-              onBuy={(gk, item, price) => setBuyState({ groupKey: gk, item, price })}
+              onBuy={(gk, item, price, costPrice) => setBuyState({ groupKey: gk, item, price, costPrice })}
             />
           ))}
         </div>
       </div>
 
-      {/* Modal Overlay Pipelines */}
+      {/* BuyModal */}
       {buyState && (
         <BuyModal {...buyState} onClose={() => setBuyState(null)} />
       )}
 
       {/* Top Up Modal */}
       {showTopup && (
-        <Modal title="💳 Deposit Gateway Manual Panel" onClose={() => setShowTopup(false)} size="sm">
-          <div className="space-y-4 pt-2">
-            <div className="rounded-xl p-4 bg-slate-900 text-white border border-slate-800 relative overflow-hidden">
-              <div className="absolute right-0 bottom-0 text-slate-800 text-7xl font-black select-none pointer-events-none translate-y-4 translate-x-2">MTN</div>
-              <p className="font-bold text-indigo-400 text-xs uppercase tracking-wider mb-3">Merchant Receiver Info</p>
-              <div className="space-y-2 relative z-10">
+        <Modal title="💳 Top Up Wallet" onClose={() => setShowTopup(false)} size="sm">
+          <div className="space-y-4">
+            <div className="rounded-xl p-4 bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100">
+              <p className="font-bold text-blue-800 text-sm mb-3">💳 MoMo Payment Details</p>
+              <div className="space-y-1.5">
                 <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">Account Name:</span>
-                  <span className="font-bold text-slate-100">Osei Michael</span>
+                  <span className="text-gray-500">MoMo Name</span>
+                  <span className="font-bold text-gray-900">Osei Michael</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">Account Number:</span>
-                  <span className="font-bold text-emerald-400 font-mono tracking-wide">0549358359</span>
+                  <span className="text-gray-500">MoMo Number</span>
+                  <span className="font-bold text-gray-900">0549358359</span>
                 </div>
               </div>
             </div>
 
-            <div className="rounded-xl p-4 bg-amber-50/60 border border-amber-100/80">
-              <p className="text-amber-800 font-bold text-xs uppercase tracking-wider mb-2">Deposit Pipeline Protocol:</p>
-              <ol className="text-xs text-amber-700 space-y-1.5 list-decimal list-inside font-medium">
-                <li>Copy the system tracking reference key below.</li>
-                <li>Transfer funds to the verified number above.</li>
-                <li>Paste the string inside the transfer reference description note field.</li>
-                <li>The system automation listener credits the client profile.</li>
+            <div className="rounded-xl p-4 bg-amber-50 border border-amber-100">
+              <p className="text-amber-800 font-semibold text-sm mb-2">📋 How to top up:</p>
+              <ol className="text-sm text-amber-700 space-y-1 list-decimal list-inside">
+                <li>Copy your Reference Code below</li>
+                <li>Send MoMo to <strong>0549358359</strong></li>
+                <li>Include the Reference Code in your transfer note</li>
+                <li>Your wallet will be credited automatically!</li>
               </ol>
             </div>
 
-            <div className="text-center bg-slate-50 border border-slate-200/60 rounded-xl py-4 px-2">
-              <p className="text-xs text-slate-500 mb-1 font-bold uppercase tracking-widest">Active Reference Token</p>
-              <div className="inline-block font-mono text-2xl font-black text-indigo-600 tracking-widest select-all bg-white px-4 py-2 rounded-lg border border-slate-200">
-                {myRef}
+            <div className="text-center">
+              <p className="text-sm text-gray-500 mb-2 font-medium">Your Reference Code</p>
+              <div className="inline-flex items-center gap-3 bg-indigo-50 border-2 border-dashed border-indigo-300 rounded-xl px-6 py-4">
+                <span className="font-mono text-3xl font-black text-indigo-700 tracking-[0.3em]">{refLoading ? '······' : myRef}</span>
               </div>
+              <p className="text-xs text-gray-400 mt-2">Include this code when making payment</p>
             </div>
 
-            <div className="rounded-xl p-3 bg-indigo-50/50 border border-indigo-100 text-center">
-              <p className="text-xs text-indigo-900 font-medium">Missing tracking notes on deposit transaction?</p>
+            <div className="rounded-xl p-4 bg-gray-50 border border-gray-200 text-center">
+              <p className="text-sm text-gray-600">Didn't use your reference code?</p>
               <button onClick={() => { setShowTopup(false); setShowClaim(true) }}
-                className="mt-1 text-indigo-600 font-bold text-xs hover:underline block mx-auto">
-                Trigger Manual ID Query Recovery →
+                className="mt-2 text-indigo-600 font-semibold text-sm hover:underline">
+                Claim with Transaction ID →
               </button>
             </div>
           </div>
@@ -253,18 +253,20 @@ export default function Dashboard({ setPage }) {
 
       {/* Reference Code Modal */}
       {showRef && (
-        <Modal title="🔑 System Reference Routing Identifier" onClose={() => setShowRef(false)} size="sm">
-          <div className="text-center space-y-4 pt-2">
-            <p className="text-xs text-slate-500 px-2">This distinct alphanumeric string dynamically connects network processing logs straight to your wallet.</p>
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl py-6 px-4 shadow-inner">
-              <p className="font-mono text-3xl font-black text-emerald-400 tracking-widest select-all">{myRef}</p>
+        <Modal title="🔑 Your Reference Code" onClose={() => setShowRef(false)} size="sm">
+          <div className="text-center space-y-4">
+            <p className="text-sm text-gray-500">Use this code in your MoMo transfer description for automatic wallet credit</p>
+            <div className="py-6">
+              <div className="inline-block bg-gradient-to-br from-indigo-50 to-purple-50 border-2 border-dashed border-indigo-300 rounded-2xl px-8 py-6">
+                <p className="font-mono text-4xl font-black text-indigo-700 tracking-[0.4em]">{refLoading ? '······' : myRef}</p>
+              </div>
             </div>
-            <div className="bg-amber-50 rounded-xl p-4 border border-amber-100 text-left text-xs text-amber-800 space-y-1">
-              <p className="font-bold uppercase tracking-wider">⚠️ Critical Disclaimer</p>
-              <p className="font-medium">Failure to include this exact identifier sequence blocks auto-processing, forcing manual lookup reconciliation.</p>
+            <div className="bg-yellow-50 rounded-xl p-4 border border-yellow-100 text-left">
+              <p className="text-sm font-semibold text-yellow-800 mb-1">⚠️ Important</p>
+              <p className="text-xs text-yellow-700">This code is linked to your account. Always include it in the description of your MoMo transfer to auto-credit your wallet.</p>
             </div>
-            <Btn onClick={() => { navigator.clipboard?.writeText(myRef); toast.success('Copied token to clipboard!') }} className="w-full bg-slate-900 hover:bg-slate-800 text-white">
-              Copy Reference Token
+            <Btn onClick={() => { navigator.clipboard?.writeText(myRef); toast.success('Copied!') }} className="w-full">
+              📋 Copy Code
             </Btn>
           </div>
         </Modal>
@@ -272,20 +274,20 @@ export default function Dashboard({ setPage }) {
 
       {/* Claim with TxID */}
       {showClaim && (
-        <Modal title="🧾 Manual TxID Reconcile Panel" onClose={() => setShowClaim(false)} size="sm">
-          <div className="space-y-4 pt-2">
-            <div className="bg-blue-50/60 rounded-xl p-4 border border-blue-100 text-xs text-blue-800 leading-relaxed">
-              Input the raw electronic ledger hash transaction reference ID listed on your mobile operator money distribution notification receipt below.
+        <Modal title="🧾 Claim with Transaction ID" onClose={() => setShowClaim(false)} size="sm">
+          <div className="space-y-4">
+            <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
+              <p className="text-sm text-blue-700">If you made a payment but didn't include your reference code, enter the transaction ID from your MoMo receipt to claim the amount.</p>
             </div>
             <Input
-              label="Transaction Hash reference ID"
+              label="Transaction ID"
               value={claimTxId}
               onChange={e => setClaimTxId(e.target.value)}
-              placeholder="e.g. 42938472938"
+              placeholder="e.g. GH123456789"
               icon="🔍"
             />
-            <Btn onClick={handleClaim} loading={claimLoading} className="w-full shadow-sm" size="lg">
-              Verify & Reconcile Transaction
+            <Btn onClick={handleClaim} loading={claimLoading} className="w-full" size="lg">
+              Claim Amount
             </Btn>
           </div>
         </Modal>
