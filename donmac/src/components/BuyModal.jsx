@@ -5,7 +5,7 @@ import { PACKAGES } from '../lib/packages'
 import useCartStore from '../store/cartStore'
 import toast from 'react-hot-toast'
 
-export default function BuyModal({ groupKey, item, price, onClose }) {
+export default function BuyModal({ groupKey, item, price, costPrice, onClose }) {
   const [phone, setPhone] = useState('')
   const [err, setErr] = useState('')
   const { addItem, setOpen: setCartOpen } = useCartStore()
@@ -20,12 +20,10 @@ export default function BuyModal({ groupKey, item, price, onClose }) {
       id: item.id,
       data: item.data,
       price,
-      costPrice: item.price,
+      costPrice: costPrice ?? item.price,
       phone,
       groupKey,
       network: group.network,
-      ghdata_type: group.ghdata_type, // ADD THIS LINE
-      isManual: group.ghdata_type === 'mtn-ishare', // FLAG FOR MANUAL DELIVERY
     })
     toast.success('Added to cart!')
     onClose()
