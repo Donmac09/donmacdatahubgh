@@ -1,3 +1,4 @@
+// components/Topbar.jsx
 import { useState, useEffect, useRef } from 'react'
 import useAuthStore from '../store/authStore'
 import useCartStore from '../store/cartStore'
@@ -5,7 +6,7 @@ import { supabase, getNotifications, markNotifRead, getAnnouncements, subscribeN
 import { formatCurrency, timeAgo } from '../lib/utils'
 import { sounds } from '../lib/sounds'
 
-export default function Topbar({ page, setPage, collapsed, onOpenMobileMenu, onAnnouncementVisibilityChange }) {
+export default function Topbar({ page, setPage, collapsed, onOpenMobileMenu }) {
   const { profile } = useAuthStore()
   const { items: cartItems, setOpen: setCartOpen } = useCartStore()
   const [notifs, setNotifs] = useState([])
@@ -14,17 +15,20 @@ export default function Topbar({ page, setPage, collapsed, onOpenMobileMenu, onA
   const [showAnnouncement, setShowAnnouncement] = useState(true)
   const notifRef = useRef(null)
 
-  // Report the ACTUAL visible state (announcement exists AND not dismissed)
-  // up to the parent layout, so page content padding stays in sync even
-  // after the user dismisses the banner.
+  // Load announcements (but don't show at top)
   useEffect(() => {
-    onAnnouncementVisibilityChange?.(Boolean(announcement) && showAnnouncement)
-  }, [announcement, showAnnouncement])
+    if (!profile?.id) return
+    loadAnnouncement()
+
+    const annSub = subscribeAnnouncements(() => loadAnnouncement())
+    return () => {
+      supabase?.removeChannel?.(annSub)
+    }
+  }, [profile?.id])
 
   useEffect(() => {
     if (!profile?.id) return
     loadNotifs()
-    loadAnnouncement()
 
     const sub = subscribeNotifications(profile.id, (payload) => {
       const n = payload.new
@@ -32,11 +36,9 @@ export default function Topbar({ page, setPage, collapsed, onOpenMobileMenu, onA
       sounds.notification()
       setShowNotifs(true)
     })
-    const annSub = subscribeAnnouncements(() => loadAnnouncement())
 
     return () => {
-      supabase.removeChannel(sub)
-      supabase.removeChannel(annSub)
+      supabase?.removeChannel?.(sub)
     }
   }, [profile?.id])
 
@@ -47,30 +49,6 @@ export default function Topbar({ page, setPage, collapsed, onOpenMobileMenu, onA
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
   }, [])
-
-  async function handleMarkRead(id) {
-    // Optimistically update UI immediately
-    setNotifs(prev => prev.map(n => n.id === id ? { ...n, read: true } : n))
-    try {
-      await markNotifRead(id)
-    } catch {
-      // Revert on failure
-      setNotifs(prev => prev.map(n => n.id === id ? { ...n, read: false } : n))
-    }
-  }
-
-  async function handleMarkAllRead() {
-    const unreadIds = notifs.filter(n => !n.read).map(n => n.id)
-    if (unreadIds.length === 0) return
-    // Optimistic update
-    setNotifs(prev => prev.map(n => ({ ...n, read: true })))
-    try {
-      await Promise.all(unreadIds.map(id => markNotifRead(id)))
-    } catch {
-      // Reload from server on failure to resync
-      loadNotifs()
-    }
-  }
 
   async function loadNotifs() {
     try {
@@ -86,8 +64,27 @@ export default function Topbar({ page, setPage, collapsed, onOpenMobileMenu, onA
     } catch {}
   }
 
+  async function handleMarkRead(id) {
+    setNotifs(prev => prev.map(n => n.id === id ? { ...n, read: true } : n))
+    try {
+      await markNotifRead(id)
+    } catch {
+      setNotifs(prev => prev.map(n => n.id === id ? { ...n, read: false } : n))
+    }
+  }
+
+  async function handleMarkAllRead() {
+    const unreadIds = notifs.filter(n => !n.read).map(n => n.id)
+    if (unreadIds.length === 0) return
+    setNotifs(prev => prev.map(n => ({ ...n, read: true })))
+    try {
+      await Promise.all(unreadIds.map(id => markNotifRead(id)))
+    } catch {
+      loadNotifs()
+    }
+  }
+
   const unread = notifs.filter(n => !n.read).length
-  // Desktop-only left offset (sidebar pushes content on lg+, floats over content on mobile/tablet)
   const leftPad = collapsed ? 'lg:left-16' : 'lg:left-60'
 
   const pageTitles = {
@@ -100,28 +97,28 @@ export default function Topbar({ page, setPage, collapsed, onOpenMobileMenu, onA
     profile: '👤 Profile',
   }
 
-  const annColors = {
-    info:    'bg-blue-50 border-blue-200 text-blue-800',
-    warning: 'bg-amber-50 border-amber-200 text-amber-800',
-    success: 'bg-green-50 border-green-200 text-green-800',
-    error:   'bg-red-50 border-red-200 text-red-800',
-  }
-
   return (
-    <div>
-      {/* Announcement Banner */}
+    <>
+      {/* Announcement Banner - Now shown as an inline notification inside the topbar */}
       {announcement && showAnnouncement && (
-        <div className={`fixed top-0 left-0 ${leftPad} right-0 z-20 transition-all duration-300`}>
-          <div className={`flex items-center gap-3 px-4 sm:px-6 py-2.5 border-b text-sm font-medium ${annColors[announcement.type] || annColors.info}`}>
-            <span>📢</span>
-            <span className="flex-1 truncate">{announcement.message}</span>
-            <button onClick={() => setShowAnnouncement(false)} className="opacity-60 hover:opacity-100 font-bold text-lg leading-none flex-shrink-0">&times;</button>
+        <div className={`fixed ${leftPad} right-0 z-20 transition-all duration-300 top-16`}>
+          <div className="mx-4 sm:mx-6 mb-2 flex items-center gap-3 px-4 py-2.5 rounded-xl border text-sm font-medium shadow-lg bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200 text-blue-800">
+            <span className="text-lg">📢</span>
+            <span className="flex-1 truncate font-medium">{announcement.message}</span>
+            <button 
+              onClick={() => setShowAnnouncement(false)} 
+              className="p-1 rounded-lg hover:bg-white/50 transition flex-shrink-0"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
         </div>
       )}
 
-      {/* Topbar */}
-      <header className={`fixed left-0 ${leftPad} right-0 z-20 transition-all duration-300 ${announcement && showAnnouncement ? 'top-[42px]' : 'top-0'} bg-white/95 backdrop-blur-md border-b border-gray-100 h-16 flex items-center justify-between px-3 sm:px-6 shadow-sm`}>
+      {/* Topbar - Clean design without announcement */}
+      <header className={`fixed ${leftPad} right-0 z-20 transition-all duration-300 top-0 bg-white/95 backdrop-blur-md border-b border-gray-100 h-16 flex items-center justify-between px-3 sm:px-6 shadow-sm`}>
         {/* Left: Hamburger (mobile/tablet) + Page Title */}
         <div className="flex items-center gap-2 min-w-0">
           {/* Hamburger menu — visible on mobile & tablet only */}
@@ -134,7 +131,7 @@ export default function Topbar({ page, setPage, collapsed, onOpenMobileMenu, onA
               <path d="M3 6h16M3 11h16M3 16h16" stroke="#374151" strokeWidth="2" strokeLinecap="round" />
             </svg>
           </button>
-          <h1 className="text-base sm:text-lg font-bold text-gray-900 truncate">
+          <h1 className="text-base sm:text-lg font-bold text-gray-900 truncate capitalize">
             {pageTitles[page] || page}
           </h1>
         </div>
@@ -171,7 +168,11 @@ export default function Topbar({ page, setPage, collapsed, onOpenMobileMenu, onA
               <div className="absolute right-0 top-full mt-2 w-[calc(100vw-2rem)] max-w-80 bg-white rounded-2xl shadow-xl border border-gray-100 z-50 max-h-96 flex flex-col overflow-hidden animate-slide-in-right">
                 <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
                   <p className="font-semibold text-sm text-gray-900">Notifications</p>
-                  {unread > 0 && <button onClick={handleMarkAllRead} className="text-xs text-indigo-600 hover:underline">Mark all read</button>}
+                  {unread > 0 && (
+                    <button onClick={handleMarkAllRead} className="text-xs text-indigo-600 hover:underline">
+                      Mark all read
+                    </button>
+                  )}
                 </div>
                 <div className="overflow-y-auto flex-1">
                   {notifs.length === 0 ? (
@@ -203,6 +204,6 @@ export default function Topbar({ page, setPage, collapsed, onOpenMobileMenu, onA
           </button>
         </div>
       </header>
-    </div>
+    </>
   )
 }
