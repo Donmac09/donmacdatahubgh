@@ -5,7 +5,6 @@ import { formatCurrency } from '../lib/utils'
 import { Btn } from './ui'
 import { supabase } from '../lib/supabase'
 import { PACKAGES } from '../lib/packages'
-import { generateRef } from '../lib/utils'
 import { sounds } from '../lib/sounds'
 import toast from 'react-hot-toast'
 
@@ -13,7 +12,6 @@ export default function CartDrawer({ onOrderPlaced }) {
   const { items, removeItem, clear, setOpen, total } = useCartStore()
   const { profile, refreshProfile } = useAuthStore()
   const [loading, setLoading] = useState(false)
-  const [processingOrders, setProcessingOrders] = useState([])
 
   const totalAmount = items.reduce((s, i) => s + (i.price || 0), 0)
 
@@ -25,104 +23,53 @@ export default function CartDrawer({ onOrderPlaced }) {
       return
     }
     setLoading(true)
-    const orderIds = []
-    
     try {
-      for (const item of items) {
-        const ref = generateRef()
-        const group = PACKAGES[item.groupKey]
-        
-        // Determine if this is a manual package (MTN Mashup)
-        const isManual = item.ghdata_type === 'mtn-ishare' || 
-                        item.id?.startsWith('mm') || 
-                        item.id?.startsWith('mmm')
+      // Get current session token to authenticate the server-side order placement
+      const { data: { session }, error: sessErr } = await supabase.auth.getSession()
+      if (sessErr || !session?.access_token) {
+        throw new Error('Your session expired. Please log in again.')
+      }
 
-        // Insert order with all fields
-        const { data: order, error: orderErr } = await supabase.from('orders').insert({
-          ref,
-          user_id: profile.id,
-          reseller_id: profile.reseller_id || null,
-          network: group?.network || item.network,
-          package: item.data,
-          package_key: item.id,
-          phone: item.phone,
-          amount: item.price,
-          cost_price: item.costPrice || item.price,
-          profit: (item.price - (item.costPrice || item.price)),
-          status: 'pending',
-          ghdata_type: group?.ghdata_type || null,
-          is_manual: isManual,
-          item_data: {
-            data: item.data,
+      // Build payload — server resolves manual vs auto-delivery and dispatches
+      // to GHData only for MTN, Telecel, AirtelTigo Premium & Big Time.
+      // MTN Mashup Data / MTN Mashup Minutes+Data are never sent to GHData.
+      const payload = {
+        items: items.map(item => {
+          const group = PACKAGES[item.groupKey]
+          return {
             groupKey: item.groupKey,
-            network: group?.network
+            itemId: item.id,
+            dataLabel: item.data,
+            network: group?.network || item.network,
+            phone: item.phone,
+            price: item.price,
+            costPrice: item.costPrice || item.price,
           }
-        }).select().single()
-        if (orderErr) throw orderErr
+        }),
+      }
 
-        orderIds.push(order.id)
+      const res = await fetch('/api/orders/place', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify(payload),
+      })
 
-        // Debit wallet
-        await supabase.rpc('credit_user', {
-          p_user_id: profile.id,
-          p_amount: -item.price,
-          p_desc: `Purchase ${group?.network} ${item.data} (Ref: ${ref})`
-        })
+      const result = await res.json()
 
-        // Record transaction
-        await supabase.from('transactions').insert({
-          user_id: profile.id,
-          type: 'debit',
-          description: `Purchase ${group?.network || ''} ${item.data} — ${item.phone}`,
-          amount: item.price,
-          status: 'success',
-        })
-
-        // Notify
-        await supabase.from('notifications').insert({
-          user_id: profile.id,
-          title: 'Order Placed!',
-          message: `Your order for ${group?.network} ${item.data} (Ref: ${ref}) has been placed.`,
-          type: 'order',
-        })
+      if (!res.ok) {
+        throw new Error(result.error || 'Failed to place order')
       }
 
       await refreshProfile()
       sounds.order()
-      toast.success(`${items.length} order(s) placed successfully!`)
-      
-      // Process orders with GHData via Edge Function
-      if (orderIds.length > 0) {
-        setProcessingOrders(orderIds)
-        // Call the Edge Function for each order
-        for (const orderId of orderIds) {
-          try {
-            const response = await fetch(
-              `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fulfill-order`,
-              {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${profile.api_token}`,
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ order_id: orderId })
-              }
-            )
-            const result = await response.json()
-            console.log(`📦 Order ${orderId} fulfillment:`, result)
-          } catch (err) {
-            console.error(`❌ Failed to fulfill order ${orderId}:`, err)
-            // Don't show error to user - order is already placed
-          }
-        }
-        setProcessingOrders([])
-      }
-      
+      toast.success(`${result.orders.length} order(s) placed successfully!`)
       clear()
       setOpen(false)
       onOrderPlaced?.()
     } catch (err) {
-      console.error('Checkout error:', err)
       toast.error(err.message || 'Failed to place order')
       sounds.error()
     } finally {
@@ -154,21 +101,11 @@ export default function CartDrawer({ onOrderPlaced }) {
             </div>
           ) : items.map(item => {
             const group = PACKAGES[item.groupKey]
-            const isManual = item.ghdata_type === 'mtn-ishare' || 
-                            item.id?.startsWith('mm') || 
-                            item.id?.startsWith('mmm')
             return (
               <div key={item.cartId} className="bg-gray-50 rounded-xl p-4 border border-gray-100">
                 <div className="flex justify-between items-start">
                   <div>
-                    <div className="flex items-center gap-2">
-                      <p className="font-semibold text-gray-900 text-sm">{item.data}</p>
-                      {isManual && (
-                        <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                          Manual
-                        </span>
-                      )}
-                    </div>
+                    <p className="font-semibold text-gray-900 text-sm">{item.data}</p>
                     <p className="text-xs text-gray-500 mt-0.5">{group?.label}</p>
                     <p className="text-xs text-gray-500">📞 {item.phone}</p>
                     <p className="text-xs text-gray-400 mt-0.5">Validity: {group?.validity}</p>
