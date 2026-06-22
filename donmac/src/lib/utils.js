@@ -1,9 +1,7 @@
 export function generateRef() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
   let ref = ''
-  for (let i = 0; i < 6; i++) {
-    ref += chars[Math.floor(Math.random() * chars.length)]
-  }
+  for (let i = 0; i < 6; i++) ref += chars[Math.floor(Math.random() * chars.length)]
   return ref
 }
 
@@ -30,26 +28,28 @@ export function formatDateShort(d) {
 
 export function timeAgo(d) {
   if (!d) return ''
-  
-  // Math.max fixes device synchronization delay discrepancies
-  const diffMs = Date.now() - new Date(d).getTime()
-  const seconds = Math.floor(Math.max(0, diffMs) / 1000)
-  
+  const seconds = Math.floor((Date.now() - new Date(d).getTime()) / 1000)
   if (seconds < 60) return 'just now'
-  
   const minutes = Math.floor(seconds / 60)
   if (minutes < 60) return `${minutes}m ago`
-  
   const hours = Math.floor(minutes / 60)
   if (hours < 24) return `${hours}h ago`
-  
   const days = Math.floor(hours / 24)
   return `${days}d ago`
 }
 
 export function cls(...args) {
-  // .flatMap handles arrays or conditional structures cleanly without leaving double whitespace gaps
-  return args.flat().filter(Boolean).map(str => String(str).trim()).join(' ')
+  return args.filter(Boolean).join(' ')
+}
+
+// Returns today's date as YYYY-MM-DD in the LOCAL timezone (not UTC),
+// so "today" filters match what the user actually sees on their device clock.
+export function getTodayDateStr() {
+  const d = new Date()
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 export const STATUS_CONFIG = {
