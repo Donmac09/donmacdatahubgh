@@ -3,13 +3,13 @@ import { getAllTopups } from '../../lib/supabase'
 import { supabase } from '../../lib/supabase'
 import { formatCurrency, formatDate } from '../../lib/utils'
 import { Card, Table, Td, StatusBadge, DateFilters, Empty } from '../../components/ui'
+import { useTodayDateRange } from '../../hooks/useTodayDateRange'
 import toast from 'react-hot-toast'
 
 export default function AdminTopUps() {
   const [topups, setTopups] = useState([])
   const [loading, setLoading] = useState(true)
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  const { from: dateFrom, to: dateTo, setFrom: setDateFrom, setTo: setDateTo, resetToToday } = useTodayDateRange()
   const [statusFilter, setStatusFilter] = useState('')
 
   useEffect(() => { load() }, [])
@@ -41,7 +41,7 @@ export default function AdminTopUps() {
           <option value="claimed">Claimed</option>
           <option value="unclaimed">Unclaimed</option>
         </select>
-        <DateFilters from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} />
+        <DateFilters from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} onReset={resetToToday} />
       </div>
 
       <Card className="p-0 overflow-hidden">
