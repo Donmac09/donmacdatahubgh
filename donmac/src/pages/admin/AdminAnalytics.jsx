@@ -2,19 +2,39 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { formatCurrency } from '../../lib/utils'
 import { StatCard, Card } from '../../components/ui'
-import { getGHDataWalletBalance, GHDATA_TOKEN } from '../../lib/packages'
 
 export default function AdminAnalytics() {
   const [stats, setStats] = useState({ revenue: 0, users: 0, orders: 0, pending: 0, resellers: 0, delivered: 0 })
   const [topResellers, setTopResellers] = useState([])
-  const [ghdataBalance, setGhdataBalance] = useState(null)
-  const [loadingBalance, setLoadingBalance] = useState(false)
-  const [balanceError, setBalanceError] = useState(null)
+  const [balances, setBalances] = useState({ platform: null, ghdata: null, ghdataError: null, loading: true })
 
-  useEffect(() => { 
+  useEffect(() => {
     load()
-    fetchGHDataBalance()
+    loadBalances()
   }, [])
+
+  async function loadBalances() {
+    setBalances(b => ({ ...b, loading: true }))
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) throw new Error('No session')
+
+      const res = await fetch('/api/admin/ghdata-balance', {
+        headers: { 'Authorization': `Bearer ${session.access_token}` },
+      })
+      const result = await res.json()
+      if (!res.ok) throw new Error(result.error)
+
+      setBalances({
+        platform: result.platform_balance,
+        ghdata: result.ghdata_balance,
+        ghdataError: result.ghdata_error,
+        loading: false,
+      })
+    } catch (e) {
+      setBalances(b => ({ ...b, loading: false, ghdataError: e.message }))
+    }
+  }
 
   async function load() {
     try {
@@ -35,25 +55,44 @@ export default function AdminAnalytics() {
     } catch {}
   }
 
-  async function fetchGHDataBalance() {
-    setLoadingBalance(true)
-    setBalanceError(null)
-    try {
-      const balance = await getGHDataWalletBalance(GHDATA_TOKEN)
-      setGhdataBalance(balance)
-    } catch (error) {
-      console.error('Error fetching GHData balance:', error)
-      setBalanceError(error.message || 'Failed to fetch balance')
-    } finally {
-      setLoadingBalance(false)
-    }
-  }
-
   const medals = ['🥇', '🥈', '🥉']
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* My Balances */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Card className="p-6 bg-gradient-to-br from-indigo-600 to-purple-700 text-white border-0">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-indigo-100 text-xs font-semibold uppercase tracking-wide">My Platform Balance</p>
+              <p className="text-3xl font-black mt-1">
+                {balances.loading ? '…' : formatCurrency(balances.platform || 0)}
+              </p>
+              <p className="text-indigo-200 text-xs mt-1">Admin wallet on Donmac Data Hub</p>
+            </div>
+            <span className="text-4xl opacity-80">💼</span>
+          </div>
+        </Card>
+
+        <Card className="p-6 bg-gradient-to-br from-emerald-600 to-teal-700 text-white border-0">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-emerald-100 text-xs font-semibold uppercase tracking-wide">GHData Wallet Balance</p>
+              <p className="text-3xl font-black mt-1">
+                {balances.loading ? '…' : balances.ghdata !== null ? formatCurrency(balances.ghdata) : '—'}
+              </p>
+              <p className="text-emerald-200 text-xs mt-1">
+                {balances.ghdataError ? `⚠️ ${balances.ghdataError}` : 'Wholesale funding balance'}
+              </p>
+            </div>
+            <button onClick={loadBalances} className="text-2xl opacity-80 hover:opacity-100 transition" title="Refresh">
+              🔄
+            </button>
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
         <StatCard icon="💰" label="Total Revenue" value={formatCurrency(stats.revenue)} color="emerald" />
         <StatCard icon="👥" label="Total Customers" value={stats.users} color="blue" />
         <StatCard icon="📦" label="Total Orders" value={stats.orders} color="indigo" />
@@ -61,54 +100,6 @@ export default function AdminAnalytics() {
         <StatCard icon="✅" label="Delivered" value={stats.delivered} color="emerald" />
         <StatCard icon="🏪" label="Resellers" value={stats.resellers} color="purple" />
       </div>
-
-      {/* GHData Wallet Balance */}
-      <Card className="p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="font-bold text-gray-900">📡 GHData Wallet Balance</h3>
-            <p className="text-xs text-gray-400 mt-0.5">Connected to GHDataConnect API</p>
-          </div>
-          <button 
-            onClick={fetchGHDataBalance} 
-            className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
-            disabled={loadingBalance}
-          >
-            {loadingBalance ? '⏳ Refreshing...' : '↻ Refresh'}
-          </button>
-        </div>
-        
-        <div className="mt-4 p-4 rounded-xl bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100">
-          {loadingBalance ? (
-            <div className="flex items-center justify-center py-4">
-              <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-            </div>
-          ) : balanceError ? (
-            <div className="text-center py-4">
-              <p className="text-sm text-red-500">⚠️ {balanceError}</p>
-              <p className="text-xs text-gray-400 mt-1">Check your API token and connection</p>
-            </div>
-          ) : ghdataBalance ? (
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600">Available Balance</p>
-                <p className="text-3xl font-black text-indigo-600">
-                  {formatCurrency(ghdataBalance.balance || 0)}
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="text-xs text-gray-400">Last updated</p>
-                <p className="text-xs text-gray-500">{new Date().toLocaleString()}</p>
-              </div>
-            </div>
-          ) : (
-            <div className="text-center py-4">
-              <p className="text-sm text-gray-500">No balance data available</p>
-              <p className="text-xs text-gray-400 mt-1">Click refresh to try again</p>
-            </div>
-          )}
-        </div>
-      </Card>
 
       {/* Top Resellers */}
       <Card className="p-6">
