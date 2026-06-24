@@ -3,13 +3,13 @@ import useAuthStore from '../store/authStore'
 import { getTopups } from '../lib/supabase'
 import { formatCurrency, formatDate } from '../lib/utils'
 import { Card, Table, Td, StatusBadge, DateFilters, Empty } from '../components/ui'
+import { useTodayDateRange } from '../hooks/useTodayDateRange'
 
 export default function TopUps() {
   const { profile } = useAuthStore()
   const [topups, setTopups] = useState([])
   const [loading, setLoading] = useState(true)
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  const { from: dateFrom, to: dateTo, setFrom: setDateFrom, setTo: setDateTo, resetToToday } = useTodayDateRange()
 
   useEffect(() => { load() }, [profile])
 
@@ -30,7 +30,7 @@ export default function TopUps() {
     <div className="space-y-5 animate-fade-in">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h2 className="text-xl font-bold text-gray-900">Top Up History</h2>
-        <DateFilters from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} />
+        <DateFilters from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} onReset={resetToToday} />
       </div>
 
       <Card className="p-0 overflow-hidden">
