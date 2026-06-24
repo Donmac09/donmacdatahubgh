@@ -3,15 +3,15 @@ import useAuthStore from '../store/authStore'
 import { getOrders } from '../lib/supabase'
 import { formatCurrency, formatDate } from '../lib/utils'
 import { Card, Table, Td, StatusBadge, NetworkBadge, DateFilters, Empty } from '../components/ui'
+import { useTodayDateRange } from '../hooks/useTodayDateRange'
 
 export default function Orders() {
   const { profile } = useAuthStore()
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  const { from: dateFrom, to: dateTo, setFrom: setDateFrom, setTo: setDateTo, resetToToday } = useTodayDateRange()
 
-  useEffect(() => { load() }, [profile])
+  useEffect(() => { load() }, [profile, dateFrom, dateTo])
 
   async function load() {
     try {
@@ -30,7 +30,7 @@ export default function Orders() {
     <div className="space-y-5 animate-fade-in">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h2 className="text-xl font-bold text-gray-900">My Orders</h2>
-        <DateFilters from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} />
+        <DateFilters from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} onReset={resetToToday} />
       </div>
       <Card className="p-0 overflow-hidden">
         {loading ? (
