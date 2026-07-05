@@ -7,7 +7,7 @@ const supabaseServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey)
 
 // ============================================================
-// STRICT BLOCKED TOKENS - Expanded to prevent false matches
+// BLOCKED TOKENS - Words that look like ref codes but aren't
 // ============================================================
 const BLOCKED_TOKENS = new Set([
   'AMOUNT', 'STATUS', 'MOBILE', 'BALANC', 'VOLUME', 'MASHUP',
@@ -15,30 +15,36 @@ const BLOCKED_TOKENS = new Set([
   'MTN', 'VODA', 'TIGO', 'MOMO', 'CASH', 'GHANA', 'PAY',
   'LUKMAN', 'KOFI', 'AMA', 'YAW', 'KWAME', 'AKUA',
   'JOE', 'MIKE', 'JOHN', 'PETER', 'DAVID', 'PAUL',
-  // 🔴 Critical additions to prevent random matches:
   'RECEIV', 'CASHIN', 'CREDIT', 'DEBIT', 'BALANCE',
   'PENDING', 'SUCCESS', 'FAILED', 'DECLINED', 'REFUND',
   'MESSAGE', 'SENDER', 'PHONE', 'NUMBER', 'CALLER',
-  'TEST', 'DEMO', 'SAMPLE', 'EXAMPLE', 'DUMMY'
+  'TEST', 'DEMO', 'SAMPLE', 'EXAMPLE', 'DUMMY',
+  'TOTAL', 'BONUS', 'PROMO', 'DISCOUNT'
 ])
 
 // ============================================================
-// VALIDATION: Check if this is actually an SMS
+// STRICT VALIDATION: Check if this is actually an SMS
 // ============================================================
 function isValidSms(text) {
   if (!text || typeof text !== 'string' || text.trim().length < 10) {
     return false
   }
 
-  // Must contain at least one of these indicators
+  // Must contain at least one financial indicator
   const indicators = [
     'GHS', 'MTN', 'TELECEL', 'AIRTEL', 'TIGO', 'MOMO',
-    'received', 'payment', 'trans', 'txn', 'ref', 'credited',
-    'debit', 'balance', 'cash', 'money', 'wallet'
+    'received', 'payment', 'trans', 'txn', 'credited',
+    'debit', 'balance', 'cash', 'money', 'wallet',
+    'amount', 'paid', 'transfer', 'deposit'
   ]
   
   const lowerText = text.toLowerCase()
-  return indicators.some(ind => lowerText.includes(ind))
+  const hasIndicator = indicators.some(ind => lowerText.includes(ind))
+  
+  // Must also contain a number (amount)
+  const hasNumber = /\d+/.test(text)
+  
+  return hasIndicator && hasNumber
 }
 
 // ============================================================
@@ -98,16 +104,16 @@ function extractSmsText(body) {
 }
 
 // ============================================================
-// PARSE SMS: Extract amount, txId, refCode
+// PARSE SMS: Extract amount, txId, refCode (if present)
 // ============================================================
 function parseSMS(text) {
   const result = {
     amount: null,
     txId: null,
     refCode: null,
-    network: 'MoMo',
-    possibleRefs: [],
-    isValid: false
+    network: 'Unknown',
+    sender: null,
+    phone: null
   }
 
   if (!text || !text.trim()) return result
@@ -115,12 +121,21 @@ function parseSMS(text) {
   const trimmedText = text.trim()
 
   // ============================================================
-  // 1. Extract Amount
+  // 1. Extract Amount (GHS)
   // ============================================================
+  // Try: GHS 50.00 or 50.00 GHS
   const amountMatch = trimmedText.match(/GHS\s*([0-9]+(?:\.[0-9]{1,2})?)/i) ||
     trimmedText.match(/([0-9]+(?:\.[0-9]{1,2})?)\s*GHS/i)
   if (amountMatch) {
     result.amount = parseFloat(amountMatch[1])
+  }
+
+  // If no GHS found, try any number with currency context
+  if (!result.amount) {
+    const currencyMatch = trimmedText.match(/(?:amount|payment|transfer|received|credited|paid|deposit).*?([0-9]+(?:\.[0-9]{1,2})?)/i)
+    if (currencyMatch) {
+      result.amount = parseFloat(currencyMatch[1])
+    }
   }
 
   // ============================================================
@@ -129,44 +144,41 @@ function parseSMS(text) {
   const txMatch = trimmedText.match(/(?:Trans|Txn|Transaction|Tx)\s*(?:ID|Id|id)?\s*[:#]?\s*([A-Z0-9]{8,20})/i) ||
     trimmedText.match(/\b([A-Z0-9]{9,15})\b/i)
   if (txMatch) {
-    result.txId = txMatch[1].toUpperCase()
+    const potential = txMatch[1].toUpperCase()
+    // Don't use if it's a blocked token
+    if (!BLOCKED_TOKENS.has(potential)) {
+      result.txId = potential
+    }
   }
 
   // ============================================================
-  // 3. Extract Reference Code (ONLY if preceded by "Ref" or "Reference")
+  // 3. Extract Reference Code (ONLY if explicitly labeled)
   // ============================================================
-  // 🔴 FIX: Only extract if explicitly labeled as a reference
   const refPatternMatch = trimmedText.match(/(?:Ref|Reference)[:\s#]*([A-Z0-9]{6})\b/i)
   if (refPatternMatch) {
     const refCandidate = refPatternMatch[1].toUpperCase()
-    // Verify it's not a blocked token
     if (!BLOCKED_TOKENS.has(refCandidate) && !/^\d+$/.test(refCandidate)) {
       result.refCode = refCandidate
-      result.possibleRefs.push(refCandidate)
     }
   }
 
   // ============================================================
-  // 4. Fallback: Find all 6-char tokens (but only if they make sense)
+  // 4. Look for 6-character codes in SMS (for reference matching)
   // ============================================================
-  // Only use this as a fallback if we already have a refCode
-  if (result.refCode) {
-    const allSixCharMatches = trimmedText.match(/\b([A-Z0-9]{6})\b/gi) || []
-    const cleanTokens = allSixCharMatches
-      .map(t => t.toUpperCase())
-      .filter(t => {
-        if (t.length !== 6) return false
-        if (/^\d+$/.test(t)) return false
-        if (BLOCKED_TOKENS.has(t)) return false
-        return true
-      })
-    
-    // Add any additional tokens found
-    for (const token of cleanTokens) {
-      if (!result.possibleRefs.includes(token)) {
-        result.possibleRefs.push(token)
-      }
+  // Find all 6-character alphanumeric tokens
+  const allSixCharMatches = trimmedText.match(/\b([A-Z0-9]{6})\b/gi) || []
+  const possibleRefs = []
+  
+  for (const match of allSixCharMatches) {
+    const token = match.toUpperCase()
+    if (!BLOCKED_TOKENS.has(token) && !/^\d+$/.test(token)) {
+      possibleRefs.push(token)
     }
+  }
+  
+  // If we found a refCode, also add it to possible refs
+  if (result.refCode && !possibleRefs.includes(result.refCode)) {
+    possibleRefs.unshift(result.refCode)
   }
 
   // ============================================================
@@ -182,13 +194,156 @@ function parseSMS(text) {
   }
 
   // ============================================================
-  // 6. Mark as valid if we have enough information
+  // 6. Extract sender/phone if present
   // ============================================================
-  if (result.amount && result.amount > 0) {
-    result.isValid = true
+  const phoneMatch = trimmedText.match(/(?:from|sender|phone|number)[:\s]*([0-9]{10,15})/i) ||
+    trimmedText.match(/\b(0[0-9]{9,12})\b/)
+  if (phoneMatch) {
+    result.phone = phoneMatch[1]
   }
 
+  // Store possible refs for processing
+  result.possibleRefs = possibleRefs
+
   return result
+}
+
+// ============================================================
+// PROCESS: Try to find and claim a topup
+// ============================================================
+async function processTopup(parsed, rawSms) {
+  let credited = false
+  let creditedUserId = null
+  let usedRef = null
+
+  // If we have a refCode, try that first
+  const refsToTry = []
+  if (parsed.refCode) refsToTry.push(parsed.refCode)
+  if (parsed.possibleRefs) {
+    for (const ref of parsed.possibleRefs) {
+      if (!refsToTry.includes(ref)) refsToTry.push(ref)
+    }
+  }
+
+  console.log(`🔍 Trying refs: ${refsToTry.join(', ') || 'none'}`)
+
+  // If no refs found, try to match by amount and transaction ID
+  if (refsToTry.length === 0) {
+    console.log('ℹ️ No reference code found, trying amount matching...')
+    
+    // Look for unclaimed topups with matching amount (within reasonable range)
+    const { data: matchingTopups } = await supabaseAdmin
+      .from('topups')
+      .select('*')
+      .eq('status', 'unclaimed')
+      .gte('amount', (parsed.amount || 0) - 0.5)
+      .lte('amount', (parsed.amount || 0) + 0.5)
+      .limit(5)
+
+    if (matchingTopups && matchingTopups.length > 0) {
+      // If multiple, use the oldest one
+      const topup = matchingTopups[0]
+      console.log(`✅ Found matching topup by amount: ${topup.reference_code}`)
+      
+      const result = await claimTopup(topup, parsed, rawSms)
+      if (result.credited) {
+        return result
+      }
+    }
+    
+    console.log('ℹ️ No matching topup found by amount')
+    return { credited: false, userId: null, usedRef: null }
+  }
+
+  // Try each reference code
+  for (const token of refsToTry) {
+    if (!token) continue
+
+    console.log(`🔍 Looking for topup with reference: ${token}`)
+
+    const { data: topupRows } = await supabaseAdmin
+      .from('topups')
+      .select('*')
+      .eq('reference_code', token)
+      .eq('status', 'unclaimed')
+      .limit(1)
+
+    if (topupRows && topupRows.length > 0) {
+      const topup = topupRows[0]
+      const result = await claimTopup(topup, parsed, rawSms)
+      if (result.credited) {
+        return { ...result, usedRef: token }
+      }
+    }
+  }
+
+  return { credited: false, userId: null, usedRef: null }
+}
+
+// ============================================================
+// CLAIM: Process a specific topup
+// ============================================================
+async function claimTopup(topup, parsed, rawSms) {
+  const targetUser = topup.user_id
+
+  if (!targetUser || !parsed.amount || parsed.amount <= 0) {
+    return { credited: false, userId: null }
+  }
+
+  try {
+    // Get user's current balance
+    const { data: profile } = await supabaseAdmin
+      .from('profiles')
+      .select('balance')
+      .eq('id', targetUser)
+      .single()
+
+    const originalBalance = Number(profile?.balance || 0)
+    const finalizedBalance = originalBalance + parsed.amount
+
+    // Update profile balance
+    await supabaseAdmin
+      .from('profiles')
+      .update({ balance: finalizedBalance })
+      .eq('id', targetUser)
+
+    // Mark topup as claimed
+    await supabaseAdmin
+      .from('topups')
+      .update({
+        status: 'claimed',
+        claimed_by: targetUser,
+        amount: parsed.amount,
+        transaction_id: parsed.txId || topup.transaction_id,
+        network: parsed.network || topup.network,
+        raw_sms: rawSms,
+        claimed_at: new Date().toISOString()
+      })
+      .eq('id', topup.id)
+
+    // Create transaction record
+    await supabaseAdmin.from('transactions').insert({
+      user_id: targetUser,
+      type: 'credit',
+      description: `Auto-topup via SMS. Ref: ${topup.reference_code}. TxID: ${parsed.txId || 'N/A'}`,
+      amount: parsed.amount,
+      status: 'success'
+    })
+
+    // Send notification
+    await supabaseAdmin.from('notifications').insert({
+      user_id: targetUser,
+      title: 'Wallet Credited! 💰',
+      message: `₵${parsed.amount.toFixed(2)} added to your wallet.`,
+      type: 'topup'
+    })
+
+    console.log(`✅ Successfully credited user ${targetUser} with ₵${parsed.amount}`)
+    return { credited: true, userId: targetUser }
+  } catch (error) {
+    console.error('❌ Error claiming topup:', error.message)
+    return { credited: false, userId: null }
+  }
 }
 
 // ============================================================
@@ -199,8 +354,8 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     return res.status(200).json({
       success: true,
-      message: 'Webhook endpoint is active. Send POST requests with SMS content.',
-      tip: 'Include SMS text in fields: message, sms, text, body, payload, or data'
+      message: 'Webhook endpoint is active',
+      tip: 'Send SMS in fields: message, sms, text, body, payload, or data'
     })
   }
 
@@ -219,10 +374,10 @@ export default async function handler(req, res) {
 
     // ✅ If no SMS found, return early (prevent random top-ups!)
     if (!rawSms || !rawSms.trim() || rawSms.trim().length < 10) {
-      console.log('⚠️ No valid SMS text found in payload. Ignoring request.')
+      console.log('⚠️ No valid SMS text found. Ignoring request.')
       return res.status(200).json({
         success: false,
-        message: 'No SMS text found in payload - ignored',
+        message: 'No SMS text found - ignored',
         received: body
       })
     }
@@ -243,25 +398,21 @@ export default async function handler(req, res) {
     // Parse the SMS
     // ============================================================
     const parsed = parseSMS(rawSms)
-    console.log('🔍 Parsed:', parsed)
+    console.log('🔍 Parsed:', {
+      amount: parsed.amount,
+      txId: parsed.txId,
+      refCode: parsed.refCode,
+      possibleRefs: parsed.possibleRefs,
+      network: parsed.network
+    })
 
-    // ✅ If no amount or refCode, don't process
+    // ✅ If no amount, can't process
     if (!parsed.amount || parsed.amount <= 0) {
       console.log('⚠️ No valid amount found. Skipping.')
       return res.status(200).json({
         success: false,
         message: 'No valid amount found - ignored',
         extracted: { amount: parsed.amount }
-      })
-    }
-
-    // ✅ If no refCode, don't process (prevents random top-ups)
-    if (!parsed.refCode) {
-      console.log('⚠️ No reference code found. Skipping.')
-      return res.status(200).json({
-        success: false,
-        message: 'No reference code found - ignored',
-        extracted: { refCode: parsed.refCode, possibleRefs: parsed.possibleRefs }
       })
     }
 
@@ -288,95 +439,15 @@ export default async function handler(req, res) {
     }
 
     // ============================================================
-    // Process the top-up
+    // 🔴 CRITICAL: Process the topup WITHOUT auto-creating
     // ============================================================
-    let credited = false
-    let creditedUserId = null
-
-    // Use the refCode we found
-    const refsToTry = [parsed.refCode, ...parsed.possibleRefs]
-    const uniqueRefs = [...new Set(refsToTry)]
-
-    for (const token of uniqueRefs) {
-      if (!token) continue
-
-      console.log(`🔍 Looking for topup with reference: ${token}`)
-
-      const { data: topupRows } = await supabaseAdmin
-        .from('topups')
-        .select('*')
-        .eq('reference_code', token)
-        .eq('status', 'unclaimed')
-        .limit(1)
-
-      if (topupRows && topupRows.length > 0) {
-        const matchingTopup = topupRows[0]
-        const targetUser = matchingTopup.user_id
-
-        console.log(`✅ Found matching topup for user: ${targetUser}`)
-
-        if (targetUser && parsed.amount && parsed.amount > 0) {
-          // Update user balance
-          const { data: profile } = await supabaseAdmin
-            .from('profiles')
-            .select('balance')
-            .eq('id', targetUser)
-            .single()
-
-          const originalBalance = Number(profile?.balance || 0)
-          const finalizedBalance = originalBalance + parsed.amount
-
-          // Update profile balance
-          await supabaseAdmin
-            .from('profiles')
-            .update({ balance: finalizedBalance })
-            .eq('id', targetUser)
-
-          // Mark topup as claimed
-          await supabaseAdmin
-            .from('topups')
-            .update({
-              status: 'claimed',
-              claimed_by: targetUser,
-              amount: parsed.amount,
-              transaction_id: parsed.txId || matchingTopup.transaction_id,
-              network: parsed.network,
-              raw_sms: rawSms
-            })
-            .eq('id', matchingTopup.id)
-
-          // Create transaction record
-          await supabaseAdmin.from('transactions').insert({
-            user_id: targetUser,
-            type: 'credit',
-            description: `Auto-topup via SMS. Ref: [${token}]. TxID: ${parsed.txId || 'N/A'}`,
-            amount: parsed.amount,
-            status: 'success'
-          })
-
-          // Send notification
-          await supabaseAdmin.from('notifications').insert({
-            user_id: targetUser,
-            title: 'Wallet Credited! 💰',
-            message: `₵${parsed.amount.toFixed(2)} added to your wallet.`,
-            type: 'topup'
-          })
-
-          credited = true
-          creditedUserId = targetUser
-          console.log(`✅ Successfully credited user ${targetUser} with ₵${parsed.amount}`)
-          break
-        }
-      }
-    }
+    const result = await processTopup(parsed, rawSms)
 
     // ============================================================
-    // 🔴 REMOVED: Auto-creation of topups
+    // 🔴 NEVER auto-create topups - just return the result
     // ============================================================
-    // We no longer create unclaimed topups automatically.
-    // This prevents random SMS from creating phantom records.
-    if (!credited) {
-      console.log(`⚠️ No matching unclaimed topup found for ref: ${parsed.refCode}`)
+    if (!result.credited) {
+      console.log(`ℹ️ No matching topup found. SMS logged but no action taken.`)
       return res.status(200).json({
         success: false,
         message: 'No matching unclaimed topup found',
@@ -384,9 +455,10 @@ export default async function handler(req, res) {
           amount: parsed.amount,
           txId: parsed.txId,
           refCode: parsed.refCode,
-          possibleRefs: parsed.possibleRefs,
+          possibleRefs: parsed.possibleRefs || [],
           network: parsed.network
-        }
+        },
+        suggestion: 'A topup record with this reference or amount does not exist in the system.'
       })
     }
 
@@ -395,17 +467,19 @@ export default async function handler(req, res) {
     // ============================================================
     return res.status(200).json({
       success: true,
-      credited,
-      user_id: creditedUserId,
+      credited: true,
+      user_id: result.userId,
       amount: parsed.amount,
       transaction_id: parsed.txId,
-      reference_code: parsed.refCode,
+      reference_code: result.usedRef,
       extracted: {
         amount: parsed.amount,
         txId: parsed.txId,
         refCode: parsed.refCode,
-        possibleRefs: parsed.possibleRefs,
-        network: parsed.network
+        possibleRefs: parsed.possibleRefs || [],
+        network: parsed.network,
+        phone: parsed.phone,
+        sender: parsed.sender
       }
     })
   } catch (globalError) {
