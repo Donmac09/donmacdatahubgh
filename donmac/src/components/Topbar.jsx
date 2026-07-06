@@ -113,10 +113,10 @@ export default function Topbar({ page, setPage, collapsed, onAnnouncementVisibil
         </div>
       )}
 
-      {/* Topbar - No Hamburger */}
+      {/* Topbar - Fixed: Added left padding on mobile to avoid hamburger menu */}
       <header className={`fixed left-0 ${leftPad} right-0 z-20 transition-all duration-300 ${announcement && showAnnouncement ? 'top-[42px]' : 'top-0'} bg-white/95 backdrop-blur-md border-b border-gray-100 h-16 flex items-center justify-between px-3 sm:px-6 shadow-sm`}>
-        {/* Left: Page Title only */}
-        <div className="flex items-center gap-2 min-w-0">
+        {/* Left: Page Title - Added pl-12 on mobile to avoid hamburger menu */}
+        <div className="flex items-center gap-2 min-w-0 pl-12 sm:pl-0">
           <h1 className="text-base sm:text-lg font-bold text-gray-900 truncate">
             {pageTitles[page] || page}
           </h1>
