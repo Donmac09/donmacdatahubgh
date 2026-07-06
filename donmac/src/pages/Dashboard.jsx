@@ -1,4 +1,3 @@
-// pages/Dashboard.jsx
 import { useState, useEffect } from 'react'
 import useAuthStore from '../store/authStore'
 import { PACKAGES } from '../lib/packages'
@@ -11,89 +10,49 @@ import { supabase } from '../lib/supabase'
 import { sounds } from '../lib/sounds'
 import toast from 'react-hot-toast'
 
-// ============================================================
-// STYLES
-// ============================================================
-const ANN_STYLES = {
-  info:    'bg-blue-50 border-blue-200 text-blue-800',
-  warning: 'bg-amber-50 border-amber-200 text-amber-800',
-  success: 'bg-green-50 border-green-200 text-green-800',
-  error:   'bg-red-50 border-red-200 text-red-800',
-}
-
-const ANN_ICONS = {
-  info: 'ℹ️',
-  warning: '⚠️',
-  success: '✅',
-  error: '🚨',
-}
-
-// ============================================================
-// MAIN COMPONENT
-// ============================================================
 export default function Dashboard({ setPage }) {
-  // ============================================================
-  // STATE
-  // ============================================================
   const { profile, refreshProfile } = useAuthStore()
-  
-  // Time
   const [now, setNow] = useState(new Date())
-  
-  // Packages
   const [pkgConfig, setPkgConfig] = useState([])
   const [resellerPrices, setResellerPrices] = useState({})
-  const [buyState, setBuyState] = useState(null)
-  
-  // Modals
+  const [buyState, setBuyState] = useState(null) // { groupKey, item, price }
   const [showTopup, setShowTopup] = useState(false)
   const [showRef, setShowRef] = useState(false)
   const [showClaim, setShowClaim] = useState(false)
-  
-  // Reference
   const [myRef, setMyRef] = useState('')
   const [refLoading, setRefLoading] = useState(false)
-  
-  // Claim
+
+  useEffect(() => {
+    if (!profile?.id) return
+    setRefLoading(true)
+    supabase.rpc('get_or_create_reference_code', { p_user_id: profile.id })
+      .then(({ data, error }) => {
+        if (!error && data) setMyRef(data)
+        else setMyRef(generateRef()) // fallback so UI never breaks
+      })
+      .finally(() => setRefLoading(false))
+  }, [profile?.id])
   const [claimTxId, setClaimTxId] = useState('')
   const [claimLoading, setClaimLoading] = useState(false)
-  
-  // Orders
   const [orders, setOrders] = useState([])
-  
-  // Announcement
   const [announcement, setAnnouncement] = useState(null)
 
-  // ============================================================
-  // EFFECTS
-  // ============================================================
-  
-  // Load reference code - using the RPC function
-useEffect(() => {
-  if (!profile?.id) return
-  
-  setRefLoading(true)
-  supabase.rpc('get_or_create_reference_code', { p_user_id: profile.id })
-    .then(({ data, error }) => {
-      if (!error && data) {
-        setMyRef(data)
-      } else {
-        console.error('Error getting reference code:', error)
-        // Fallback
-        setMyRef(generateRef())
-      }
-    })
-    .finally(() => setRefLoading(false))
-}, [profile?.id]) // Only runs when profile.id changes
-  // ============================================================
-  // DATA LOADING FUNCTIONS
-  // ============================================================
-  
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(t)
+  }, [])
+
+  useEffect(() => {
+    loadConfig()
+    loadRecentOrders()
+    getAnnouncements(true).then(a => setAnnouncement(a[0] || null)).catch(() => {})
+  }, [profile])
+
   async function loadConfig() {
     try {
       const cfg = await getPackagesConfig()
       setPkgConfig(cfg)
-      
+      // Load reseller prices if customer has a reseller
       const resellerId = profile?.reseller_id || profile?.reseller?.id
       if (resellerId) {
         const prices = await getResellerPrices(resellerId)
@@ -101,119 +60,50 @@ useEffect(() => {
         prices.forEach(p => { map[p.package_key] = p.price })
         setResellerPrices(map)
       }
-    } catch (error) {
-      console.error('Error loading config:', error)
-    }
+    } catch {}
   }
 
   async function loadRecentOrders() {
     try {
-      const { data } = await supabase
-        .from('orders')
-        .select('*')
-        .eq('user_id', profile.id)
-        .order('created_at', { ascending: false })
-        .limit(5)
+      const { data } = await supabase.from('orders').select('*').eq('user_id', profile.id).order('created_at', { ascending: false }).limit(5)
       setOrders(data || [])
-    } catch (error) {
-      console.error('Error loading orders:', error)
-    }
+    } catch {}
   }
 
-  async function loadAnnouncement() {
+  async function handleClaim() {
+    if (!claimTxId.trim()) { toast.error('Enter transaction ID'); return }
+    setClaimLoading(true)
     try {
-      const userRole = profile?.role || 'customer'
-      const anns = await getAnnouncements(true, userRole)
-      setAnnouncement(anns[0] || null)
-    } catch (error) {
-      console.error('Error loading announcement:', error)
-    }
-  }
+      // Find unclaimed topup with this txId
+      const { data: topup, error } = await supabase.from('topups')
+        .select('*').eq('transaction_id', claimTxId.trim()).single()
+      if (error || !topup) throw new Error('Transaction ID not found. Contact admin.')
+      if (topup.status === 'claimed') throw new Error('This transaction has already been claimed.')
 
-  // ============================================================
-// FIXED: HANDLE CLAIM FUNCTION
-// ============================================================
-async function handleClaim() {
-  if (!claimTxId.trim()) {
-    toast.error('Enter transaction ID')
-    return
-  }
-  
-  setClaimLoading(true)
-  try {
-    // Get the topup record
-    const { data: topup, error } = await supabase
-      .from('topups')
-      .select('*')
-      .eq('transaction_id', claimTxId.trim())
-      .single()
-      
-    if (error || !topup) {
-      throw new Error('Transaction ID not found. Contact admin.')
-    }
-    
-    if (topup.status === 'claimed') {
-      throw new Error('This transaction has already been claimed.')
-    }
+      // Claim it
+      await supabase.from('topups').update({ status: 'claimed', claimed_by: profile.id, user_id: profile.id }).eq('id', topup.id)
 
-    // ============================================================
-    // FIX: Direct database updates (bypass RPC for reliability)
-    // ============================================================
-    
-    // 1. Update profile balance
-    const currentBalance = profile.balance || 0
-    const newBalance = currentBalance + topup.amount
-    
-    const { error: balanceError } = await supabase
-      .from('profiles')
-      .update({ balance: newBalance })
-      .eq('id', profile.id)
-      
-    if (balanceError) throw balanceError
-
-    // 2. Update topup status
-    const { error: topupError } = await supabase
-      .from('topups')
-      .update({ 
-        status: 'claimed', 
-        claimed_by: profile.id, 
-        user_id: profile.id 
+      // Credit wallet
+      const newBal = (profile.balance || 0) + topup.amount
+      await supabase.from('profiles').update({ balance: newBal }).eq('id', profile.id)
+      await supabase.from('transactions').insert({
+        user_id: profile.id, type: 'credit',
+        description: 'Manual claim via TxID: ' + claimTxId,
+        amount: topup.amount, status: 'success'
       })
-      .eq('id', topup.id)
-      
-    if (topupError) throw topupError
 
-    // 3. Record transaction
-    const { error: txError } = await supabase
-      .from('transactions')
-      .insert({
-        user_id: profile.id,
-        type: 'credit',
-        description: `Manual claim via TxID: ${claimTxId.trim()}`,
-        amount: topup.amount,
-        status: 'success'
-      })
-      
-    if (txError) throw txError
-
-    await refreshProfile()
-    sounds.topup()
-    toast.success(`₵${topup.amount} claimed successfully!`)
-    
-    setShowClaim(false)
-    setClaimTxId('')
-    
-  } catch (error) {
-    console.error('Claim error:', error)
-    toast.error(error.message || 'Failed to claim')
-  } finally {
-    setClaimLoading(false)
+      await refreshProfile()
+      sounds.topup()
+      toast.success(`₵${topup.amount} claimed successfully!`)
+      setShowClaim(false)
+      setClaimTxId('')
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setClaimLoading(false)
+    }
   }
-}
-  // ============================================================
-  // HELPERS
-  // ============================================================
-  
+
   const greeting = () => {
     const h = now.getHours()
     if (h < 12) return 'Good morning'
@@ -221,28 +111,14 @@ async function handleClaim() {
     return 'Good evening'
   }
 
-  const dateStr = now.toLocaleDateString('en-GH', { 
-    weekday: 'long', 
-    year: 'numeric', 
-    month: 'long', 
-    day: 'numeric' 
-  })
-  
-  const timeStr = now.toLocaleTimeString('en-GH', { 
-    hour: '2-digit', 
-    minute: '2-digit', 
-    second: '2-digit' 
-  })
+  const dateStr = now.toLocaleDateString('en-GH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+  const timeStr = now.toLocaleTimeString('en-GH', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 
-  // ============================================================
-  // RENDER
-  // ============================================================
   return (
-    // FIX: Added relative z-0 to prevent content hiding behind hamburger
-    <div className="space-y-6 animate-fade-in relative z-0">
-      
-      {/* ===== 1. HERO BANNER ===== */}
+    <div className="space-y-6 animate-fade-in">
+      {/* Hero Banner */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-indigo-900 to-slate-900 p-6 sm:p-8 text-white">
+        {/* Decorative circles */}
         <div className="absolute -right-16 -top-16 w-64 h-64 rounded-full bg-indigo-500/10 pointer-events-none" />
         <div className="absolute -right-4 bottom-0 w-40 h-40 rounded-full bg-purple-500/10 pointer-events-none" />
         <div className="absolute left-1/2 top-0 w-24 h-24 rounded-full bg-yellow-400/10 pointer-events-none" />
@@ -250,128 +126,63 @@ async function handleClaim() {
         <div className="relative z-10 flex flex-col sm:flex-row sm:items-end justify-between gap-6">
           <div>
             <p className="text-indigo-300 text-sm font-medium mb-1">{dateStr}</p>
-            <h2 className="text-2xl sm:text-3xl font-bold mb-1">
-              {greeting()}, {profile?.name?.split(' ')[0] || 'User'}! 👋
-            </h2>
+            <h2 className="text-2xl sm:text-3xl font-bold mb-1">{greeting()}, {profile?.name?.split(' ')[0]}! 👋</h2>
             <p className="text-slate-400 text-sm">Welcome back to Donmac Data Hub</p>
             <p className="text-indigo-200 font-mono text-base mt-2">{timeStr}</p>
           </div>
-          
           <div className="flex flex-col items-start sm:items-end gap-1">
-            <p className="text-slate-400 text-xs font-medium uppercase tracking-wider">
-              Wallet Balance
-            </p>
-            <p className="text-4xl font-black text-white">
-              {formatCurrency(profile?.balance || 0)}
-            </p>
+            <p className="text-slate-400 text-xs font-medium uppercase tracking-wider">Wallet Balance</p>
+            <p className="text-4xl font-black text-white">{formatCurrency(profile?.balance || 0)}</p>
           </div>
         </div>
       </div>
 
-      {/* ===== 2. ANNOUNCEMENT BANNER ===== */}
-      {announcement && (
-        <div className={`flex items-center gap-3 px-4 sm:px-6 py-3 rounded-xl border shadow-sm ${ANN_STYLES[announcement.type] || ANN_STYLES.info}`}>
-          <span className="text-xl flex-shrink-0">
-            {ANN_ICONS[announcement.type] || '📢'}
-          </span>
-          <div className="flex-1">
-            {announcement.title && (
-              <span className="font-bold text-sm mr-2">{announcement.title}:</span>
-            )}
-            <span className="text-sm font-medium">{announcement.message}</span>
-          </div>
-          <span className="text-xs opacity-60 flex-shrink-0">
-            {new Date(announcement.created_at).toLocaleDateString()}
-          </span>
-        </div>
-      )}
-
-      {/* ===== 3. STAT CARDS ===== */}
+      {/* Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <StatCard 
-          icon="💰" 
-          label="Wallet Balance" 
-          value={formatCurrency(profile?.balance || 0)} 
-          color="indigo" 
-        />
-        <StatCard 
-          icon="📦" 
-          label="Total Orders" 
-          value={orders.length} 
-          color="amber" 
-        />
-        <StatCard 
-          icon="💳" 
-          label="Top Ups" 
-          value={profile?.role || '—'} 
-          sub="Account type" 
-          color="emerald" 
-        />
-        <StatCard 
-          icon="📊" 
-          label="Account Status" 
-          value={profile?.status === 'blocked' ? 'Blocked' : 'Active'} 
-          color={profile?.status === 'blocked' ? 'red' : 'emerald'} 
-        />
+        <StatCard icon="💰" label="Wallet Balance" value={formatCurrency(profile?.balance || 0)} color="indigo" />
+        <StatCard icon="📦" label="Total Orders" value={orders.length} color="amber" />
+        <StatCard icon="💳" label="Top Ups" value={profile?.role || '—'} sub="Account type" color="emerald" />
+        <StatCard icon="📊" label="Account Status" value={profile?.status === 'blocked' ? 'Blocked' : 'Active'} color={profile?.status === 'blocked' ? 'red' : 'emerald'} />
       </div>
 
-      {/* ===== 4. QUICK ACTIONS ===== */}
+      {/* Action Buttons */}
       <Card className="p-5">
-        <h3 className="font-bold text-gray-800 mb-4 text-sm uppercase tracking-wider">
-          Quick Actions
-        </h3>
+        <h3 className="font-bold text-gray-800 mb-4 text-sm uppercase tracking-wider">Quick Actions</h3>
         <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
-          <button
-            onClick={() => setShowTopup(true)}
-            className="flex flex-col items-center gap-2 p-4 rounded-xl bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-100 hover:shadow-md transition group"
-          >
+          <button onClick={() => setShowTopup(true)}
+            className="flex flex-col items-center gap-2 p-4 rounded-xl bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-100 hover:shadow-md transition group">
             <span className="text-2xl group-hover:scale-110 transition-transform">💳</span>
             <span className="text-sm font-semibold text-emerald-700">Top Up</span>
           </button>
-          
-          <button
-            onClick={() => setShowRef(true)}
-            className="flex flex-col items-center gap-2 p-4 rounded-xl bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100 hover:shadow-md transition group"
-          >
+          <button onClick={() => setShowRef(true)}
+            className="flex flex-col items-center gap-2 p-4 rounded-xl bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100 hover:shadow-md transition group">
             <span className="text-2xl group-hover:scale-110 transition-transform">🔑</span>
             <span className="text-sm font-semibold text-indigo-700">Reference Code</span>
           </button>
-          
-          <button
-            onClick={() => setShowClaim(true)}
-            className="flex flex-col items-center gap-2 p-4 rounded-xl bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-100 hover:shadow-md transition group"
-          >
+          <button onClick={() => setShowClaim(true)}
+            className="flex flex-col items-center gap-2 p-4 rounded-xl bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-100 hover:shadow-md transition group">
             <span className="text-2xl group-hover:scale-110 transition-transform">🧾</span>
             <span className="text-sm font-semibold text-amber-700">Claim with TxID</span>
           </button>
-          
-          <button
-            onClick={() => setPage('orders')}
-            className="flex flex-col items-center gap-2 p-4 rounded-xl bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100 hover:shadow-md transition group"
-          >
+          <button onClick={() => setPage('orders')}
+            className="flex flex-col items-center gap-2 p-4 rounded-xl bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100 hover:shadow-md transition group">
             <span className="text-2xl group-hover:scale-110 transition-transform">📦</span>
             <span className="text-sm font-semibold text-blue-700">My Orders</span>
           </button>
-          
-          <button
-            onClick={() => setPage('transactions')}
-            className="flex flex-col items-center gap-2 p-4 rounded-xl bg-gradient-to-br from-purple-50 to-pink-50 border border-purple-100 hover:shadow-md transition group"
-          >
+          <button onClick={() => setPage('transactions')}
+            className="flex flex-col items-center gap-2 p-4 rounded-xl bg-gradient-to-br from-purple-50 to-pink-50 border border-purple-100 hover:shadow-md transition group">
             <span className="text-2xl group-hover:scale-110 transition-transform">💰</span>
             <span className="text-sm font-semibold text-purple-700">Transactions</span>
           </button>
-          
-          <button
-            onClick={() => setPage('topups')}
-            className="flex flex-col items-center gap-2 p-4 rounded-xl bg-gradient-to-br from-rose-50 to-pink-50 border border-rose-100 hover:shadow-md transition group"
-          >
+          <button onClick={() => setPage('topups')}
+            className="flex flex-col items-center gap-2 p-4 rounded-xl bg-gradient-to-br from-rose-50 to-pink-50 border border-rose-100 hover:shadow-md transition group">
             <span className="text-2xl group-hover:scale-110 transition-transform">📜</span>
             <span className="text-sm font-semibold text-rose-700">Top Up History</span>
           </button>
         </div>
       </Card>
 
-      {/* ===== 5. PACKAGES ===== */}
+      {/* Packages */}
       <div>
         <h3 className="font-bold text-gray-900 text-lg mb-4">Available Packages</h3>
         <div className="space-y-4">
@@ -382,19 +193,13 @@ async function handleClaim() {
               group={group}
               pkgConfig={pkgConfig}
               resellerPrices={resellerPrices}
-              onBuy={(gk, item, price, costPrice) => 
-                setBuyState({ groupKey: gk, item, price, costPrice })
-              }
+              onBuy={(gk, item, price, costPrice) => setBuyState({ groupKey: gk, item, price, costPrice })}
             />
           ))}
         </div>
       </div>
 
-      {/* ============================================================
-          MODALS
-      ============================================================ */}
-
-      {/* Buy Modal */}
+      {/* BuyModal */}
       {buyState && (
         <BuyModal {...buyState} onClose={() => setBuyState(null)} />
       )}
@@ -430,22 +235,15 @@ async function handleClaim() {
             <div className="text-center">
               <p className="text-sm text-gray-500 mb-2 font-medium">Your Reference Code</p>
               <div className="inline-flex items-center gap-3 bg-indigo-50 border-2 border-dashed border-indigo-300 rounded-xl px-6 py-4">
-                <span className="font-mono text-3xl font-black text-indigo-700 tracking-[0.3em]">
-                  {refLoading ? '······' : myRef}
-                </span>
+                <span className="font-mono text-3xl font-black text-indigo-700 tracking-[0.3em]">{refLoading ? '······' : myRef}</span>
               </div>
               <p className="text-xs text-gray-400 mt-2">Include this code when making payment</p>
             </div>
 
             <div className="rounded-xl p-4 bg-gray-50 border border-gray-200 text-center">
               <p className="text-sm text-gray-600">Didn't use your reference code?</p>
-              <button
-                onClick={() => {
-                  setShowTopup(false)
-                  setShowClaim(true)
-                }}
-                className="mt-2 text-indigo-600 font-semibold text-sm hover:underline"
-              >
+              <button onClick={() => { setShowTopup(false); setShowClaim(true) }}
+                className="mt-2 text-indigo-600 font-semibold text-sm hover:underline">
                 Claim with Transaction ID →
               </button>
             </div>
@@ -457,43 +255,29 @@ async function handleClaim() {
       {showRef && (
         <Modal title="🔑 Your Reference Code" onClose={() => setShowRef(false)} size="sm">
           <div className="text-center space-y-4">
-            <p className="text-sm text-gray-500">
-              Use this code in your MoMo transfer description for automatic wallet credit
-            </p>
+            <p className="text-sm text-gray-500">Use this code in your MoMo transfer description for automatic wallet credit</p>
             <div className="py-6">
               <div className="inline-block bg-gradient-to-br from-indigo-50 to-purple-50 border-2 border-dashed border-indigo-300 rounded-2xl px-8 py-6">
-                <p className="font-mono text-4xl font-black text-indigo-700 tracking-[0.4em]">
-                  {refLoading ? '······' : myRef}
-                </p>
+                <p className="font-mono text-4xl font-black text-indigo-700 tracking-[0.4em]">{refLoading ? '······' : myRef}</p>
               </div>
             </div>
             <div className="bg-yellow-50 rounded-xl p-4 border border-yellow-100 text-left">
               <p className="text-sm font-semibold text-yellow-800 mb-1">⚠️ Important</p>
-              <p className="text-xs text-yellow-700">
-                This code is linked to your account. Always include it in the description of your MoMo transfer to auto-credit your wallet.
-              </p>
+              <p className="text-xs text-yellow-700">This code is linked to your account. Always include it in the description of your MoMo transfer to auto-credit your wallet.</p>
             </div>
-            <Btn
-              onClick={() => {
-                navigator.clipboard?.writeText(myRef)
-                toast.success('Copied!')
-              }}
-              className="w-full"
-            >
+            <Btn onClick={() => { navigator.clipboard?.writeText(myRef); toast.success('Copied!') }} className="w-full">
               📋 Copy Code
             </Btn>
           </div>
         </Modal>
       )}
 
-      {/* Claim with TxID Modal - UPDATED */}
+      {/* Claim with TxID */}
       {showClaim && (
         <Modal title="🧾 Claim with Transaction ID" onClose={() => setShowClaim(false)} size="sm">
           <div className="space-y-4">
             <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
-              <p className="text-sm text-blue-700">
-                If you made a payment but didn't include your reference code, enter the transaction ID from your MoMo receipt to claim the amount.
-              </p>
+              <p className="text-sm text-blue-700">If you made a payment but didn't include your reference code, enter the transaction ID from your MoMo receipt to claim the amount.</p>
             </div>
             <Input
               label="Transaction ID"
@@ -503,7 +287,7 @@ async function handleClaim() {
               icon="🔍"
             />
             <Btn onClick={handleClaim} loading={claimLoading} className="w-full" size="lg">
-              💰 Claim Amount
+              Claim Amount
             </Btn>
           </div>
         </Modal>
