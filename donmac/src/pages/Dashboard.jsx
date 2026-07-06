@@ -68,33 +68,39 @@ export default function Dashboard({ setPage }) {
   // EFFECTS
   // ============================================================
   
-  // Load reference code
-  useEffect(() => {
-    if (!profile?.id) return
+  // Load reference code - only once
+useEffect(() => {
+  if (!profile?.id) return
+  
+  const loadReference = async () => {
     setRefLoading(true)
-    supabase.rpc('get_or_create_reference_code', { p_user_id: profile.id })
-      .then(({ data, error }) => {
-        if (!error && data) setMyRef(data)
-        else setMyRef(generateRef())
+    try {
+      const { data, error } = await supabase.rpc('get_or_create_reference_code', { 
+        p_user_id: profile.id 
       })
-      .finally(() => setRefLoading(false))
-  }, [profile?.id])
-
-  // Update clock every second
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 1000)
-    return () => clearInterval(t)
-  }, [])
-
-  // Load all data on mount and when profile changes
-  useEffect(() => {
-    if (!profile?.id) return
-    
-    loadConfig()
-    loadRecentOrders()
-    loadAnnouncement()
-  }, [profile])
-
+      if (!error && data) {
+        setMyRef(data)
+      } else {
+        // Only generate if no reference exists
+        const newRef = generateRef()
+        setMyRef(newRef)
+        // Save to database
+        await supabase
+          .from('profiles')
+          .update({ reference_code: newRef })
+          .eq('id', profile.id)
+      }
+    } catch (error) {
+      console.error('Error loading reference:', error)
+      setMyRef(generateRef())
+    } finally {
+      setRefLoading(false)
+    }
+  }
+  
+  loadReference()
+}, [profile?.id]) // Only run when profile.id changes
+  
   // ============================================================
   // DATA LOADING FUNCTIONS
   // ============================================================
@@ -141,56 +147,90 @@ export default function Dashboard({ setPage }) {
   }
 
   // ============================================================
-  // FIXED: HANDLE CLAIM FUNCTION - Properly adds amount to balance
-  // ============================================================
-  async function handleClaim() {
-    if (!claimTxId.trim()) {
-      toast.error('Enter transaction ID')
-      return
+// FIXED: HANDLE CLAIM FUNCTION
+// ============================================================
+async function handleClaim() {
+  if (!claimTxId.trim()) {
+    toast.error('Enter transaction ID')
+    return
+  }
+  
+  setClaimLoading(true)
+  try {
+    // First, check if the topup exists and is unclaimed
+    const { data: topup, error } = await supabase
+      .from('topups')
+      .select('*')
+      .eq('transaction_id', claimTxId.trim())
+      .single()
+      
+    if (error || !topup) {
+      throw new Error('Transaction ID not found. Contact admin.')
     }
     
-    setClaimLoading(true)
-    try {
-      // Get the topup record
-      const { data: topup, error } = await supabase
-        .from('topups')
-        .select('*')
-        .eq('transaction_id', claimTxId.trim())
-        .single()
-        
-      if (error || !topup) {
-        throw new Error('Transaction ID not found. Contact admin.')
-      }
-      
-      if (topup.status === 'claimed') {
-        throw new Error('This transaction has already been claimed.')
-      }
-
-      // ============================================================
-      // FIX: Use the claim_topup RPC function for atomic operation
-      // ============================================================
-      const { data: result, error: rpcError } = await supabase.rpc('claim_topup', {
-        p_transaction_id: claimTxId.trim(),
-        p_user_id: profile.id
-      })
-
-      if (rpcError) throw rpcError
-
-      if (result?.success) {
-        await refreshProfile()
-        sounds.topup()
-        toast.success(`₵${topup.amount} claimed successfully!`)
-        setShowClaim(false)
-        setClaimTxId('')
-      } else {
-        throw new Error(result?.message || 'Failed to claim')
-      }
-    } catch (error) {
-      toast.error(error.message)
-    } finally {
-      setClaimLoading(false)
+    if (topup.status === 'claimed') {
+      throw new Error('This transaction has already been claimed.')
     }
+
+    // Check if user already claimed this
+    if (topup.user_id && topup.user_id !== profile.id) {
+      throw new Error('This transaction has already been claimed by another user.')
+    }
+
+    // ============================================================
+    // FIX: Manually credit the wallet (bypass RPC for reliability)
+    // ============================================================
+    
+    // 1. Update profile balance
+    const currentBalance = profile.balance || 0
+    const newBalance = currentBalance + topup.amount
+    
+    const { error: balanceError } = await supabase
+      .from('profiles')
+      .update({ balance: newBalance })
+      .eq('id', profile.id)
+      
+    if (balanceError) throw balanceError
+
+    // 2. Update topup status
+    const { error: topupError } = await supabase
+      .from('topups')
+      .update({ 
+        status: 'claimed', 
+        claimed_by: profile.id, 
+        user_id: profile.id 
+      })
+      .eq('id', topup.id)
+      
+    if (topupError) throw topupError
+
+    // 3. Record transaction
+    const { error: txError } = await supabase
+      .from('transactions')
+      .insert({
+        user_id: profile.id,
+        type: 'credit',
+        description: `Manual claim via TxID: ${claimTxId.trim()}`,
+        amount: topup.amount,
+        status: 'success'
+      })
+      
+    if (txError) throw txError
+
+    await refreshProfile()
+    sounds.topup()
+    toast.success(`₵${topup.amount} claimed successfully!`)
+    
+    setShowClaim(false)
+    setClaimTxId('')
+    
+  } catch (error) {
+    console.error('Claim error:', error)
+    toast.error(error.message || 'Failed to claim')
+  } finally {
+    setClaimLoading(false)
   }
+}
 
   // ============================================================
   // HELPERS
