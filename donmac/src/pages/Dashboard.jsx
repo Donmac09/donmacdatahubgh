@@ -68,39 +68,23 @@ export default function Dashboard({ setPage }) {
   // EFFECTS
   // ============================================================
   
-  // Load reference code - only once
+  // Load reference code - using the RPC function
 useEffect(() => {
   if (!profile?.id) return
   
-  const loadReference = async () => {
-    setRefLoading(true)
-    try {
-      const { data, error } = await supabase.rpc('get_or_create_reference_code', { 
-        p_user_id: profile.id 
-      })
+  setRefLoading(true)
+  supabase.rpc('get_or_create_reference_code', { p_user_id: profile.id })
+    .then(({ data, error }) => {
       if (!error && data) {
         setMyRef(data)
       } else {
-        // Only generate if no reference exists
-        const newRef = generateRef()
-        setMyRef(newRef)
-        // Save to database
-        await supabase
-          .from('profiles')
-          .update({ reference_code: newRef })
-          .eq('id', profile.id)
+        console.error('Error getting reference code:', error)
+        // Fallback
+        setMyRef(generateRef())
       }
-    } catch (error) {
-      console.error('Error loading reference:', error)
-      setMyRef(generateRef())
-    } finally {
-      setRefLoading(false)
-    }
-  }
-  
-  loadReference()
-}, [profile?.id]) // Only run when profile.id changes
-  
+    })
+    .finally(() => setRefLoading(false))
+}, [profile?.id]) // Only runs when profile.id changes
   // ============================================================
   // DATA LOADING FUNCTIONS
   // ============================================================
@@ -157,7 +141,7 @@ async function handleClaim() {
   
   setClaimLoading(true)
   try {
-    // First, check if the topup exists and is unclaimed
+    // Get the topup record
     const { data: topup, error } = await supabase
       .from('topups')
       .select('*')
@@ -172,13 +156,8 @@ async function handleClaim() {
       throw new Error('This transaction has already been claimed.')
     }
 
-    // Check if user already claimed this
-    if (topup.user_id && topup.user_id !== profile.id) {
-      throw new Error('This transaction has already been claimed by another user.')
-    }
-
     // ============================================================
-    // FIX: Manually credit the wallet (bypass RPC for reliability)
+    // FIX: Direct database updates (bypass RPC for reliability)
     // ============================================================
     
     // 1. Update profile balance
@@ -231,7 +210,6 @@ async function handleClaim() {
     setClaimLoading(false)
   }
 }
-
   // ============================================================
   // HELPERS
   // ============================================================
