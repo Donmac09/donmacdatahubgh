@@ -132,7 +132,6 @@ export default function Dashboard({ setPage }) {
 
   async function loadAnnouncement() {
     try {
-      // Get user role for targeted announcements
       const userRole = profile?.role || 'customer'
       const anns = await getAnnouncements(true, userRole)
       setAnnouncement(anns[0] || null)
@@ -142,9 +141,8 @@ export default function Dashboard({ setPage }) {
   }
 
   // ============================================================
-  // HANDLERS
+  // FIXED: HANDLE CLAIM FUNCTION - Properly adds amount to balance
   // ============================================================
-  
   async function handleClaim() {
     if (!claimTxId.trim()) {
       toast.error('Enter transaction ID')
@@ -153,6 +151,7 @@ export default function Dashboard({ setPage }) {
     
     setClaimLoading(true)
     try {
+      // Get the topup record
       const { data: topup, error } = await supabase
         .from('topups')
         .select('*')
@@ -167,39 +166,25 @@ export default function Dashboard({ setPage }) {
         throw new Error('This transaction has already been claimed.')
       }
 
-      // Claim the topup
-      await supabase
-        .from('topups')
-        .update({ 
-          status: 'claimed', 
-          claimed_by: profile.id, 
-          user_id: profile.id 
-        })
-        .eq('id', topup.id)
+      // ============================================================
+      // FIX: Use the claim_topup RPC function for atomic operation
+      // ============================================================
+      const { data: result, error: rpcError } = await supabase.rpc('claim_topup', {
+        p_transaction_id: claimTxId.trim(),
+        p_user_id: profile.id
+      })
 
-      // Credit wallet
-      const newBal = (profile.balance || 0) + topup.amount
-      await supabase
-        .from('profiles')
-        .update({ balance: newBal })
-        .eq('id', profile.id)
-        
-      await supabase
-        .from('transactions')
-        .insert({
-          user_id: profile.id,
-          type: 'credit',
-          description: 'Manual claim via TxID: ' + claimTxId,
-          amount: topup.amount,
-          status: 'success'
-        })
+      if (rpcError) throw rpcError
 
-      await refreshProfile()
-      sounds.topup()
-      toast.success(`₵${topup.amount} claimed successfully!`)
-      
-      setShowClaim(false)
-      setClaimTxId('')
+      if (result?.success) {
+        await refreshProfile()
+        sounds.topup()
+        toast.success(`₵${topup.amount} claimed successfully!`)
+        setShowClaim(false)
+        setClaimTxId('')
+      } else {
+        throw new Error(result?.message || 'Failed to claim')
+      }
     } catch (error) {
       toast.error(error.message)
     } finally {
@@ -231,31 +216,20 @@ export default function Dashboard({ setPage }) {
     second: '2-digit' 
   })
 
-  const pageTitles = {
-    admin: '⚙️ Admin Panel',
-    mystore: '🏪 My Store',
-    dashboard: '🏠 Dashboard',
-    topups: '💳 Top Ups',
-    orders: '📦 Orders',
-    transactions: '💰 Transactions',
-    profile: '👤 Profile',
-  }
-
   // ============================================================
   // RENDER
   // ============================================================
   return (
-    <div className="space-y-6 animate-fade-in">
+    // FIX: Added relative z-0 to prevent content hiding behind hamburger
+    <div className="space-y-6 animate-fade-in relative z-0">
       
       {/* ===== 1. HERO BANNER ===== */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-indigo-900 to-slate-900 p-6 sm:p-8 text-white">
-        {/* Decorative elements */}
         <div className="absolute -right-16 -top-16 w-64 h-64 rounded-full bg-indigo-500/10 pointer-events-none" />
         <div className="absolute -right-4 bottom-0 w-40 h-40 rounded-full bg-purple-500/10 pointer-events-none" />
         <div className="absolute left-1/2 top-0 w-24 h-24 rounded-full bg-yellow-400/10 pointer-events-none" />
 
         <div className="relative z-10 flex flex-col sm:flex-row sm:items-end justify-between gap-6">
-          {/* Left: Greeting */}
           <div>
             <p className="text-indigo-300 text-sm font-medium mb-1">{dateStr}</p>
             <h2 className="text-2xl sm:text-3xl font-bold mb-1">
@@ -265,7 +239,6 @@ export default function Dashboard({ setPage }) {
             <p className="text-indigo-200 font-mono text-base mt-2">{timeStr}</p>
           </div>
           
-          {/* Right: Balance */}
           <div className="flex flex-col items-start sm:items-end gap-1">
             <p className="text-slate-400 text-xs font-medium uppercase tracking-wider">
               Wallet Balance
@@ -495,7 +468,7 @@ export default function Dashboard({ setPage }) {
         </Modal>
       )}
 
-      {/* Claim with TxID Modal */}
+      {/* Claim with TxID Modal - UPDATED */}
       {showClaim && (
         <Modal title="🧾 Claim with Transaction ID" onClose={() => setShowClaim(false)} size="sm">
           <div className="space-y-4">
@@ -512,7 +485,7 @@ export default function Dashboard({ setPage }) {
               icon="🔍"
             />
             <Btn onClick={handleClaim} loading={claimLoading} className="w-full" size="lg">
-              Claim Amount
+              💰 Claim Amount
             </Btn>
           </div>
         </Modal>
