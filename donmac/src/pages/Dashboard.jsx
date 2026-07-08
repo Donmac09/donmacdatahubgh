@@ -71,38 +71,58 @@ export default function Dashboard({ setPage }) {
   }
 
   async function handleClaim() {
-    if (!claimTxId.trim()) { toast.error('Enter transaction ID'); return }
-    setClaimLoading(true)
-    try {
-      // Find unclaimed topup with this txId
-      const { data: topup, error } = await supabase.from('topups')
-        .select('*').eq('transaction_id', claimTxId.trim()).single()
-      if (error || !topup) throw new Error('Transaction ID not found. Contact admin.')
-      if (topup.status === 'claimed') throw new Error('This transaction has already been claimed.')
-
-      // Claim it
-      await supabase.from('topups').update({ status: 'claimed', claimed_by: profile.id, user_id: profile.id }).eq('id', topup.id)
-
-      // Credit wallet
-      const newBal = (profile.balance || 0) + topup.amount
-      await supabase.from('profiles').update({ balance: newBal }).eq('id', profile.id)
-      await supabase.from('transactions').insert({
-        user_id: profile.id, type: 'credit',
-        description: 'Manual claim via TxID: ' + claimTxId,
-        amount: topup.amount, status: 'success'
-      })
-
-      await refreshProfile()
-      sounds.topup()
-      toast.success(`₵${topup.amount} claimed successfully!`)
-      setShowClaim(false)
-      setClaimTxId('')
-    } catch (e) {
-      toast.error(e.message)
-    } finally {
-      setClaimLoading(false)
+  if (!claimTxId.trim()) { toast.error('Enter transaction ID'); return }
+  setClaimLoading(true)
+  try {
+    // Check topups table (where webhook saves)
+    const { data: topup, error } = await supabase
+      .from('topups')
+      .select('*')
+      .eq('transaction_id', claimTxId.trim())
+      .single()
+      
+    if (error || !topup) {
+      throw new Error('Transaction ID not found. Contact admin.')
     }
+    
+    if (topup.status === 'claimed') {
+      throw new Error('This transaction has already been claimed.')
+    }
+
+    // Credit wallet
+    const newBal = (profile.balance || 0) + topup.amount
+    await supabase.from('profiles').update({ balance: newBal }).eq('id', profile.id)
+
+    // Mark as claimed
+    await supabase
+      .from('topups')
+      .update({ 
+        status: 'claimed',
+        claimed_by: profile.id,
+        user_id: profile.id
+      })
+      .eq('id', topup.id)
+
+    // Record transaction
+    await supabase.from('transactions').insert({
+      user_id: profile.id,
+      type: 'credit',
+      description: 'Manual claim via TxID: ' + claimTxId,
+      amount: topup.amount,
+      status: 'success'
+    })
+
+    await refreshProfile()
+    sounds.topup()
+    toast.success(`₵${topup.amount} claimed successfully!`)
+    setShowClaim(false)
+    setClaimTxId('')
+  } catch (e) {
+    toast.error(e.message)
+  } finally {
+    setClaimLoading(false)
   }
+}
 
   const greeting = () => {
     const h = now.getHours()
