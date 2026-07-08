@@ -74,36 +74,22 @@ export default function Dashboard({ setPage }) {
   if (!claimTxId.trim()) { toast.error('Enter transaction ID'); return }
   setClaimLoading(true)
   try {
-    const { data: topup, error } = await supabase
-      .from('topups')
-      .select('*')
-      .eq('transaction_id', claimTxId.trim())
-      .single()
-      
-    if (error || !topup) throw new Error('Transaction ID not found.')
-    if (topup.status === 'claimed') throw new Error('Already claimed.')
-
-    const newBal = (profile.balance || 0) + topup.amount
-    await supabase.from('profiles').update({ balance: newBal }).eq('id', profile.id)
-    await supabase.from('topups').update({ 
-      status: 'claimed', 
-      claimed_by: profile.id, 
-      user_id: profile.id 
-    }).eq('id', topup.id)
-    
-    await supabase.from('transactions').insert({
-      user_id: profile.id, 
-      type: 'credit',
-      description: 'Manual claim via TxID: ' + claimTxId,
-      amount: topup.amount, 
-      status: 'success'
+    const { data, error } = await supabase.rpc('claim_transaction_manual', {
+      p_transaction_id: claimTxId.trim(),
+      p_user_id: profile.id
     })
-
-    await refreshProfile()
-    sounds.topup()
-    toast.success(`₵${topup.amount} claimed successfully!`)
-    setShowClaim(false)
-    setClaimTxId('')
+    
+    if (error) throw error
+    
+    if (data && data.success) {
+      await refreshProfile()
+      sounds.topup()
+      toast.success(data.message)
+      setShowClaim(false)
+      setClaimTxId('')
+    } else {
+      toast.error(data?.message || 'Failed to claim')
+    }
   } catch (e) {
     toast.error(e.message)
   } finally {
