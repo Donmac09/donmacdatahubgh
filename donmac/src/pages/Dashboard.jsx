@@ -79,19 +79,29 @@ export default function Dashboard({ setPage }) {
       p_user_id: profile.id
     })
     
-    if (error) throw error
+    if (error) {
+      console.error('Claim RPC error:', error)
+      throw new Error(error.message)
+    }
     
-    if (data && data.success) {
-      await refreshProfile()
-      sounds.topup()
-      toast.success(data.message)
-      setShowClaim(false)
-      setClaimTxId('')
+    // Check if data exists and has the success flag
+    if (data && data.length > 0) {
+      const result = data[0]
+      if (result.success) {
+        await refreshProfile()
+        sounds.topup()
+        toast.success(result.message || `₵${result.amount} claimed successfully!`)
+        setShowClaim(false)
+        setClaimTxId('')
+      } else {
+        toast.error(result.message || 'Failed to claim')
+      }
     } else {
-      toast.error(data?.message || 'Failed to claim')
+      toast.error('No response from server')
     }
   } catch (e) {
-    toast.error(e.message)
+    console.error('Claim error:', e)
+    toast.error(e.message || 'Failed to claim')
   } finally {
     setClaimLoading(false)
   }
