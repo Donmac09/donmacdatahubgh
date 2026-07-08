@@ -74,41 +74,28 @@ export default function Dashboard({ setPage }) {
   if (!claimTxId.trim()) { toast.error('Enter transaction ID'); return }
   setClaimLoading(true)
   try {
-    // Check topups table (where webhook saves)
     const { data: topup, error } = await supabase
       .from('topups')
       .select('*')
       .eq('transaction_id', claimTxId.trim())
       .single()
       
-    if (error || !topup) {
-      throw new Error('Transaction ID not found. Contact admin.')
-    }
-    
-    if (topup.status === 'claimed') {
-      throw new Error('This transaction has already been claimed.')
-    }
+    if (error || !topup) throw new Error('Transaction ID not found.')
+    if (topup.status === 'claimed') throw new Error('Already claimed.')
 
-    // Credit wallet
     const newBal = (profile.balance || 0) + topup.amount
     await supabase.from('profiles').update({ balance: newBal }).eq('id', profile.id)
-
-    // Mark as claimed
-    await supabase
-      .from('topups')
-      .update({ 
-        status: 'claimed',
-        claimed_by: profile.id,
-        user_id: profile.id
-      })
-      .eq('id', topup.id)
-
-    // Record transaction
+    await supabase.from('topups').update({ 
+      status: 'claimed', 
+      claimed_by: profile.id, 
+      user_id: profile.id 
+    }).eq('id', topup.id)
+    
     await supabase.from('transactions').insert({
-      user_id: profile.id,
+      user_id: profile.id, 
       type: 'credit',
       description: 'Manual claim via TxID: ' + claimTxId,
-      amount: topup.amount,
+      amount: topup.amount, 
       status: 'success'
     })
 
