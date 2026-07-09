@@ -17,8 +17,8 @@ export default function BuyModal({ groupKey, item, price, costPrice, onClose }) 
     if (!phone || phone.length < 10) { setErr('Enter a valid phone number (10 digits)'); return }
     setErr('')
     
-    // Determine if this package is manual delivery
-    const isManual = groupKey === 'mtn' || groupKey === 'mtn_mashup' || groupKey === 'mtn_mashup_min'
+    // ALL packages are now manual delivery
+    const isManual = true
     
     addItem({
       id: item.id,
@@ -53,14 +53,12 @@ export default function BuyModal({ groupKey, item, price, costPrice, onClose }) 
             <p className="text-3xl font-black" style={{ color: netColor }}>{formatCurrency(price)}</p>
           </div>
         </div>
-        {/* Show manual delivery badge for MTN packages */}
-        {(groupKey === 'mtn' || groupKey === 'mtn_mashup' || groupKey === 'mtn_mashup_min') && (
-          <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
-            <p className="text-xs text-amber-700 font-medium flex items-center gap-1.5">
-              <span>🔄</span> Manual delivery — processed by admin
-            </p>
-          </div>
-        )}
+        {/* Show manual delivery badge for ALL packages */}
+        <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
+          <p className="text-xs text-amber-700 font-medium flex items-center gap-1.5">
+            <span>🔄</span> Manual delivery — processed by admin
+          </p>
+        </div>
       </div>
 
       <Input
