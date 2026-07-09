@@ -55,7 +55,7 @@ export const PACKAGES = {
     gradientFrom: '#FFCC00', 
     gradientTo: '#E6B800',
     items: [
-      { id: 'mtn1', data: '1GB', price: 4.30 },
+      { id: 'mtn1', data: '1GB', price: 4.50 },
       { id: 'mtn2', data: '2GB', price: 8.60 },
       { id: 'mtn3', data: '3GB', price: 12.90 },
       { id: 'mtn4', data: '4GB', price: 17.20 },
@@ -69,7 +69,7 @@ export const PACKAGES = {
       { id: 'mtn12', data: '25GB', price: 104.00 },
       { id: 'mtn13', data: '30GB', price: 124.50 },
       { id: 'mtn14', data: '40GB', price: 164 },
-      { id: 'mtn15', data: '50GB', price: 200 },
+      { id: 'mtn15', data: '50GB', price: 205 },
     ],
   },
   telecel: {
