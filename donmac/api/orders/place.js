@@ -1,20 +1,11 @@
- // Vercel Serverless Function: POST /api/orders/place
+// Vercel Serverless Function: POST /api/orders/place
 //
 // Securely places a data order:
 //  1. Verifies the buyer's Supabase session (JWT) server-side
 //  2. Validates wallet balance, debits it, creates the order row
-//  3. Dispatches to GHData ONLY for auto-delivery networks
-//     (MTN, Telecel, AirtelTigo Premium, AirtelTigo Big Time)
-//  4. MTN Mashup Data & MTN Mashup Minutes+Data are MANUAL delivery —
+//  3. Dispatches to GHData ONLY for Telecel, AirtelTigo Premium, AirtelTigo Big Time
+//  4. MTN and MTN Mashup orders are MANUAL delivery —
 //     never sent to GHData, order just sits as 'pending' for admin to fulfil
-//
-// GHData request/response shape verified against a working production
-// integration (Lovable edge function), NOT guessed:
-//   POST https://ghdataconnect.com/api/v1/purchaseBundle
-//   Body: { network: "MTN", reference: "<our ref>", msisdn: "<phone>", capacity: <number GB> }
-//   Response on success: { success: true, data: { reference/id, ... } }
-//
-// The GHData API token NEVER reaches the browser — it lives only here.
 
 import { createClient } from '@supabase/supabase-js'
 
@@ -27,15 +18,19 @@ const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_KEY)
 const GHDATA_BASE = 'https://ghdataconnect.com/api'
 const GHDATA_TOKEN = process.env.GHDATA_API_TOKEN || '144|Upj7FsClobi8bIWLBWozmXOTRUzSDK2DCx0u2vuD3f64701d'
 
-// Package groups that are fulfilled manually by admin — NEVER sent to GHData
-const MANUAL_DELIVERY_GROUPS = new Set(['mtn_mashup', 'mtn_mashup_min'])
+// ============================================================
+// CHANGED: MTN is now MANUAL delivery (removed from auto-delivery)
+// Only Telecel and AirtelTigo go to GHData
+// ============================================================
+const MANUAL_DELIVERY_GROUPS = new Set([
+  'mtn_mashup',      // MTN Mashup - manual
+  'mtn_mashup_min',  // MTN Mashup Minutes - manual
+  'mtn'              // MTN Data - NOW MANUAL
+])
 
 // GHData accepts the network key in several casings/spellings depending on
-// account configuration — we try each candidate in order until one succeeds,
-// exactly mirroring the proven working integration rather than guessing a
-// single fixed value.
+// account configuration — we try each candidate in order until one succeeds.
 const GHDATA_NETWORK_CANDIDATES = {
-  mtn:             ['MTN', 'mtn'],
   telecel:         ['TELECEL', 'telecel'],
   airtel_bigtime:  ['AT_BIGTIME', 'AT-BIGTIME', 'atbigtime', 'at_bigtime', 'at-bigtime', 'AIRTELTIGO_BIGTIME'],
   airtel_premium:  [
@@ -82,10 +77,7 @@ async function getAuthedUser(req) {
 }
 
 // Tries each network-key candidate against GHData's purchaseBundle endpoint
-// in turn, stopping at the first success. If a candidate fails with what
-// looks like a "wrong network key" validation error, it tries the next one
-// — but if it fails for any OTHER reason (insufficient GHData balance,
-// invalid phone, etc.), it stops immediately rather than retrying uselessly.
+// in turn, stopping at the first success.
 async function dispatchToGHData({ groupKey, phone, capacity, ref }) {
   const candidates = GHDATA_NETWORK_CANDIDATES[groupKey]
   if (!candidates) throw new Error(`No GHData network mapping for group "${groupKey}"`)
@@ -190,14 +182,13 @@ export default async function handler(req, res) {
 
     for (const item of items) {
       const ref = generateRef()
+      // ============================================================
+      // CHANGED: MTN is now manual (added 'mtn' to manual groups)
+      // ============================================================
       const isManual = MANUAL_DELIVERY_GROUPS.has(item.groupKey)
       const capacity = isManual ? null : parseCapacityGB(item.dataLabel)
 
       if (!isManual && capacity === null) {
-        // Couldn't parse a GB value (e.g. "350mins + 870MB" combo packages
-        // that aren't pure GB) — these can't be auto-dispatched to GHData's
-        // capacity-based endpoint, so treat as manual to avoid a guaranteed
-        // dispatch failure.
         console.warn(`Could not parse capacity from "${item.dataLabel}" for group ${item.groupKey} — falling back to manual delivery`)
       }
       const effectiveIsManual = isManual || capacity === null
@@ -241,7 +232,10 @@ export default async function handler(req, res) {
         type: 'order',
       })
 
-      // 4. Dispatch to GHData ONLY for auto-delivery networks with a valid GB capacity
+      // ============================================================
+      // CHANGED: Only dispatch to GHData for non-MTN groups
+      // MTN is now manual and will NOT go to GHData
+      // ============================================================
       if (!effectiveIsManual) {
         try {
           const result = await dispatchToGHData({
@@ -264,9 +258,6 @@ export default async function handler(req, res) {
 
         } catch (ghErr) {
           // GHData dispatch failed — mark failed AND automatically refund
-          // the customer's wallet (mirrors the proven working integration's
-          // refund_failed_order behavior), instead of leaving them charged
-          // for an order that never got delivered.
           console.error('GHData dispatch failed for order', ref, ghErr.message)
 
           const debugInfo = ghErr.ghdataDebug
@@ -306,6 +297,15 @@ export default async function handler(req, res) {
             })
           }
         }
+      } else {
+        // Manual order - log it
+        console.log(`📝 Manual order created: ${ref} - ${item.network} ${item.dataLabel}`)
+        await supabaseAdmin
+          .from('orders')
+          .update({
+            notes: `Manual delivery required for ${item.network}`,
+          })
+          .eq('id', order.id)
       }
 
       placedOrders.push({ ...order, is_manual: effectiveIsManual })
@@ -317,4 +317,4 @@ export default async function handler(req, res) {
     console.error('place order error:', err.message)
     return res.status(400).json({ error: err.message || 'Failed to place order' })
   }
-}
+   }
