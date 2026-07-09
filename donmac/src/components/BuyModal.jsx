@@ -16,10 +16,6 @@ export default function BuyModal({ groupKey, item, price, costPrice, onClose }) 
   function handleAdd() {
     if (!phone || phone.length < 10) { setErr('Enter a valid phone number (10 digits)'); return }
     setErr('')
-    
-    // ALL packages are now manual delivery
-    const isManual = true
-    
     addItem({
       id: item.id,
       data: item.data,
@@ -28,8 +24,6 @@ export default function BuyModal({ groupKey, item, price, costPrice, onClose }) 
       phone,
       groupKey,
       network: group.network,
-      ghdata_type: group.ghdata_type || null,
-      isManual: isManual,
     })
     toast.success('Added to cart!')
     onClose()
@@ -52,12 +46,6 @@ export default function BuyModal({ groupKey, item, price, costPrice, onClose }) 
           <div className="text-right">
             <p className="text-3xl font-black" style={{ color: netColor }}>{formatCurrency(price)}</p>
           </div>
-        </div>
-        {/* Show manual delivery badge for ALL packages */}
-        <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
-          <p className="text-xs text-amber-700 font-medium flex items-center gap-1.5">
-            <span>🔄</span> Manual delivery — processed by admin
-          </p>
         </div>
       </div>
 
