@@ -61,7 +61,6 @@ export default function AdminUsers() {
       
       toast.success(`₵${amt.toFixed(2)} ${creditType === 'credit' ? 'added to' : 'deducted from'} ${creditModal.name}'s wallet`)
       
-      // Update targeted row locally to dodge unnecessary network layout layout thrashing
       setUsers(prev => prev.map(u => {
         if (u.id === creditModal.id) {
           const currentBal = u.balance || 0
@@ -94,15 +93,33 @@ export default function AdminUsers() {
     }
   }
 
+  // ============================================================
+  // FIXED: handleDelete using RPC function
+  // ============================================================
   async function handleDelete(user) {
-    if (!confirm(`Delete ${user.name}? This cannot be undone.`)) return
+    if (!confirm(`Delete ${user.name}? This will delete all their data (orders, transactions, etc.). This cannot be undone.`)) return
+    
+    setActionLoading(true)
     try {
-      await adminApiCall('/api/admin/update-user', { action: 'delete', userId: user.id })
-      toast.success(`${user.name} deleted`)
-      
-      setUsers(prev => prev.filter(u => u.id !== user.id))
+      // Use the RPC function to delete user and all related records
+      const { data, error } = await supabase.rpc('delete_user', {
+        p_user_id: user.id
+      })
+
+      if (error) throw error
+
+      if (data) {
+        toast.success(`${user.name} deleted successfully`)
+        setUsers(prev => prev.filter(u => u.id !== user.id))
+      } else {
+        toast.error('Failed to delete user')
+      }
+
     } catch (e) {
-      toast.error(e.message)
+      console.error('Delete error:', e)
+      toast.error(e.message || 'Failed to delete user')
+    } finally {
+      setActionLoading(false)
     }
   }
 
@@ -192,7 +209,8 @@ export default function AdminUsers() {
                     </button>
                     <button
                       onClick={() => handleDelete(u)}
-                      className="px-2.5 py-1 bg-gray-100 text-gray-500 rounded-lg text-xs font-semibold hover:bg-red-100 hover:text-red-600 transition"
+                      disabled={actionLoading}
+                      className="px-2.5 py-1 bg-red-50 text-red-600 rounded-lg text-xs font-semibold hover:bg-red-100 transition disabled:opacity-50"
                     >
                       Delete
                     </button>
@@ -266,5 +284,5 @@ export default function AdminUsers() {
         </Modal>
       )}
     </div>
-  )
+  ) 
 }
