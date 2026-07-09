@@ -42,8 +42,19 @@ const useAuthStore = create((set, get) => ({
     return profile
   },
 
+  // ============================================================
+  // FIX: Register - sanitize meta to prevent role injection
+  // ============================================================
   register: async (email, password, meta) => {
-    const data = await signUp(email, password, meta)
+    // Sanitize meta - only allow specific fields
+    const safeMeta = {
+      name: meta?.name || '',
+      phone: meta?.phone || '',
+      reseller_id: meta?.reseller_id || null,
+      // role is NOT sent from frontend - server will set it
+    }
+    
+    const data = await signUp(email, password, safeMeta)
     if (data.user) {
       await new Promise(r => setTimeout(r, 800))
       try {
@@ -75,12 +86,14 @@ const useAuthStore = create((set, get) => ({
   },
 
   updateProfileLocal: (updates) => {
-    set(s => ({ profile: { ...s.profile, ...updates } }))
+    // Sanitize updates - prevent role changes from frontend
+    const safeUpdates = { ...updates }
+    delete safeUpdates.role
+    delete safeUpdates.is_admin
+    delete safeUpdates.is_reseller
+    set(s => ({ profile: { ...s.profile, ...safeUpdates } }))
   },
 
-  // ============================================================
-  // FIXED: Removed email check - only role determines access
-  // ============================================================
   isAdmin: () => get().profile?.role === 'admin',
   isReseller: () => ['reseller', 'admin'].includes(get().profile?.role),
   isCustomer: () => {
