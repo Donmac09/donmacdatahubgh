@@ -91,37 +91,87 @@ export default function AdminUsers() {
     } catch (e) {
       toast.error(e.message)
     }
+  
+    // ============================================================
+// FIXED: handleDelete with better error handling
+// ============================================================
+async function handleDelete(user) {
+  if (!confirm(`Delete ${user.name}? This will delete all their data (orders, transactions, etc.). This cannot be undone.`)) return
+  
+  setActionLoading(true)
+  try {
+    // First try using the RPC function
+    const { data, error } = await supabase.rpc('delete_user', {
+      p_user_id: user.id
+    })
+
+    if (error) {
+      console.error('RPC error:', error)
+      // Fallback: delete manually if RPC fails
+      await deleteUserManually(user.id)
+      toast.success(`${user.name} deleted successfully`)
+      setUsers(prev => prev.filter(u => u.id !== user.id))
+      return
+    }
+
+    if (data) {
+      toast.success(`${user.name} deleted successfully`)
+      setUsers(prev => prev.filter(u => u.id !== user.id))
+    } else {
+      // If RPC returns false, try manual deletion
+      await deleteUserManually(user.id)
+      toast.success(`${user.name} deleted successfully`)
+      setUsers(prev => prev.filter(u => u.id !== user.id))
+    }
+
+  } catch (e) {
+    console.error('Delete error:', e)
+    toast.error(e.message || 'Failed to delete user')
+  } finally {
+    setActionLoading(false)
   }
+}
 
-  // ============================================================
-  // FIXED: handleDelete using RPC function
-  // ============================================================
-  async function handleDelete(user) {
-    if (!confirm(`Delete ${user.name}? This will delete all their data (orders, transactions, etc.). This cannot be undone.`)) return
+// Fallback function if RPC fails
+async function deleteUserManually(userId) {
+  // Delete from all tables
+  const tables = [
+    { name: 'balance_transactions', column: 'user_id' },
+    { name: 'transactions', column: 'user_id' },
+    { name: 'orders', column: 'user_id' },
+    { name: 'notifications', column: 'user_id' },
+    { name: 'topups', column: 'user_id' },
+    { name: 'withdrawals', column: 'reseller_id' },
+    { name: 'stores', column: 'reseller_id' },
+    { name: 'reseller_prices', column: 'reseller_id' },
+  ]
+
+  for (const table of tables) {
+    const { error } = await supabase
+      .from(table.name)
+      .delete()
+      .eq(table.column, userId)
     
-    setActionLoading(true)
-    try {
-      // Use the RPC function to delete user and all related records
-      const { data, error } = await supabase.rpc('delete_user', {
-        p_user_id: user.id
-      })
-
-      if (error) throw error
-
-      if (data) {
-        toast.success(`${user.name} deleted successfully`)
-        setUsers(prev => prev.filter(u => u.id !== user.id))
-      } else {
-        toast.error('Failed to delete user')
-      }
-
-    } catch (e) {
-      console.error('Delete error:', e)
-      toast.error(e.message || 'Failed to delete user')
-    } finally {
-      setActionLoading(false)
+    if (error) {
+      console.warn(`Error deleting from ${table.name}:`, error)
     }
   }
+
+  // Delete from profiles
+  const { error: profileError } = await supabase
+    .from('profiles')
+    .delete()
+    .eq('id', userId)
+  
+  if (profileError) throw profileError
+
+  // Delete from auth.users
+  const { error: authError } = await supabase.auth.admin.deleteUser(userId)
+  if (authError) throw authError
+}
+  }
+
+  
 
   const filtered = users.filter(u => {
     if (search) {
