@@ -18,6 +18,9 @@ export default function Login() {
     try {
       const profile = await login(form.email, form.password)
       
+      // ============================================================
+      // SECURITY: Check if account is blocked
+      // ============================================================
       if (profile?.status === 'blocked') {
         toast.error('Account blocked. Contact support.')
         await useAuthStore.getState().logout()
