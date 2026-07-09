@@ -37,12 +37,21 @@ function StoreAuthScreen({ store, onAuth }) {
         toast.success('Welcome back!')
         onAuth(p)
       } else {
+        // ============================================================
+        // SECURITY FIX: Registration - only send safe fields
+        // ============================================================
         if (!form.name || !form.email || !form.phone || !form.password) { setErr('All fields are required'); return }
         if (form.password.length < 6) { setErr('Password must be at least 6 characters'); return }
-        const p = await register(form.email, form.password, {
-          name: form.name, phone: form.phone,
-          role: 'customer', reseller_id: store.reseller_id
-        })
+        
+        // Only send safe fields - NO role, NO admin flags
+        const safeMeta = {
+          name: form.name,
+          phone: form.phone,
+          reseller_id: store.reseller_id
+          // role is NOT sent from frontend - server will set it to 'customer'
+        }
+        
+        const p = await register(form.email, form.password, safeMeta)
         toast.success('Account created! Welcome!')
         onAuth(p)
       }
@@ -150,6 +159,7 @@ function StoreDashboard({ store, resellerId, whatsapp }) {
   useEffect(() => {
     if (!profile?.id) return
     setRefLoading(true)
+    // Use the RPC function to get or create reference code
     supabase.rpc('get_or_create_reference_code', { p_user_id: profile.id })
       .then(({ data, error }) => {
         if (!error && data) setMyRef(data)
@@ -157,6 +167,7 @@ function StoreDashboard({ store, resellerId, whatsapp }) {
       })
       .finally(() => setRefLoading(false))
   }, [profile?.id])
+  
   const [claimTxId, setClaimTxId] = useState('')
   const [claimLoading, setClaimLoading] = useState(false)
   // Transactions
