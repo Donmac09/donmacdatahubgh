@@ -19,8 +19,32 @@ export async function signIn(email, password) {
   return data
 }
 
+// ============================================================
+// FIX: Sanitize signUp - prevent role injection
+// ============================================================
 export async function signUp(email, password, meta) {
-  const { data, error } = await supabase.auth.signUp({ email, password, options: { data: meta } })
+  // Only allow specific fields to be passed from frontend
+  const safeMeta = {
+    name: meta?.name || '',
+    phone: meta?.phone || '',
+    reseller_id: meta?.reseller_id || null,
+    // role is NOT allowed from frontend - forced to 'customer' on the server
+  }
+  
+  // Add the role explicitly on the server
+  const finalMeta = {
+    ...safeMeta,
+    role: 'customer',
+    status: 'active'
+  }
+  
+  const { data, error } = await supabase.auth.signUp({ 
+    email, 
+    password, 
+    options: { 
+      data: finalMeta 
+    } 
+  })
   if (error) throw error
   return data
 }
@@ -52,9 +76,17 @@ export async function getProfile(userId) {
 }
 
 export async function updateProfile(userId, updates) {
+  // ============================================================
+  // FIX: Prevent role updates from frontend
+  // ============================================================
+  const safeUpdates = { ...updates }
+  // Remove role from updates if present (prevent role escalation)
+  delete safeUpdates.role
+  delete safeUpdates.is_admin
+  
   const { data, error } = await supabase
     .from('profiles')
-    .update(updates)
+    .update(safeUpdates)
     .eq('id', userId)
     .select()
     .single()
