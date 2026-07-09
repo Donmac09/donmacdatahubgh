@@ -78,7 +78,10 @@ const useAuthStore = create((set, get) => ({
     set(s => ({ profile: { ...s.profile, ...updates } }))
   },
 
-  isAdmin: () => get().profile?.email === 'donmacdatahub@gmail.com' || get().profile?.role === 'admin',
+  // ============================================================
+  // FIXED: Removed email check - only role determines access
+  // ============================================================
+  isAdmin: () => get().profile?.role === 'admin',
   isReseller: () => ['reseller', 'admin'].includes(get().profile?.role),
   isCustomer: () => {
     const profile = get().profile
