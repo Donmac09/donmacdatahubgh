@@ -1,3 +1,6 @@
+// Vercel Serverless Function: /api/orders
+// External API for users with API tokens to place orders from their websites
+
 import { createClient } from '@supabase/supabase-js'
 
 const supabase = createClient(
@@ -14,12 +17,15 @@ function generateRef() {
 
 async function auth(req) {
   const t = (req.headers.authorization || '').replace('Bearer ', '').trim()
+  if (!t) throw new Error('API token required')
+  
   const { data: p } = await supabase
     .from('profiles')
     .select('*')
     .eq('api_token', t)
     .single()
   if (!p) throw new Error('Invalid API token')
+  if (p.status === 'blocked') throw new Error('Account blocked')
   return p
 }
 
@@ -33,35 +39,69 @@ export default async function handler(req, res) {
   try {
     const user = await auth(req)
     
+    // ============================================================
+    // GET: Fetch orders
+    // ============================================================
     if (req.method === 'GET') {
       const { data: orders } = await supabase
         .from('orders')
         .select('*')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
-      return res.status(200).json({ orders })
+      return res.status(200).json({ 
+        success: true, 
+        count: orders?.length || 0,
+        orders 
+      })
     }
     
+    // ============================================================
+    // POST: Place order
+    // ============================================================
     if (req.method === 'POST') {
       const { 
         network, 
         package: pkg, 
         phone, 
         package_key,
-        ghdata_type,
-        is_manual,
         amount,
-        cost_price,
-        profit,
-        item_data
       } = req.body
       
+      // Validate required fields
       if (!network || !pkg || !phone) {
-        return res.status(400).json({ error: 'network, package, phone required' })
+        return res.status(400).json({ 
+          success: false,
+          error: 'network, package, and phone are required' 
+        })
+      }
+      
+      // Validate amount
+      if (!amount || parseFloat(amount) <= 0) {
+        return res.status(400).json({ 
+          success: false,
+          error: 'amount is required and must be greater than 0' 
+        })
+      }
+      
+      // Check wallet balance
+      if (parseFloat(user.balance) < parseFloat(amount)) {
+        return res.status(400).json({ 
+          success: false,
+          error: 'Insufficient wallet balance' 
+        })
       }
       
       const ref = generateRef()
+      const numericAmount = parseFloat(amount)
       
+      // Debit wallet
+      const newBalance = parseFloat(user.balance) - numericAmount
+      await supabase
+        .from('profiles')
+        .update({ balance: newBalance })
+        .eq('id', user.id)
+      
+      // Create order
       const { data: order, error } = await supabase
         .from('orders')
         .insert({
@@ -71,23 +111,38 @@ export default async function handler(req, res) {
           package: pkg,
           package_key: package_key || pkg,
           phone,
-          amount: amount || 0,
-          cost_price: cost_price || 0,
-          profit: profit || 0,
+          amount: numericAmount,
           status: 'pending',
-          ghdata_type: ghdata_type || null,
-          is_manual: is_manual || false,
-          item_data: item_data || null,
         })
         .select()
         .single()
       
       if (error) throw error
-      return res.status(201).json({ success: true, order })
+      
+      // Record transaction
+      await supabase
+        .from('transactions')
+        .insert({
+          user_id: user.id,
+          type: 'debit',
+          description: `API Order: ${network} ${pkg} (Ref: ${ref})`,
+          amount: numericAmount,
+          status: 'success'
+        })
+      
+      return res.status(201).json({ 
+        success: true, 
+        order,
+        remaining_balance: newBalance
+      })
     }
     
     return res.status(405).json({ error: 'Method not allowed' })
+    
   } catch (e) {
-    return res.status(401).json({ error: e.message })
+    return res.status(401).json({ 
+      success: false,
+      error: e.message 
+    })
   }
 }
