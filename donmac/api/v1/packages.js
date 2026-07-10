@@ -123,14 +123,15 @@ export default async function handler(req, res) {
     // Build a lookup map: "groupKey__itemId" -> config row
     const cfgMap = {}
     for (const c of configs || []) {
-      cfgMap[c.package_group + '__' + c.package_key] = c
+      cfgMap[c.package_group + '__' + (c.package_key || '')] = c
     }
 
     const result = {}
 
     for (const [groupKey, group] of Object.entries(CATALOG)) {
-      const groupCfg = cfgMap[groupKey + '____group__'] || {}
-
+      // Check group visibility
+      const groupCfg = configs?.find(c => c.package_group === groupKey && c.package_key === '') || {}
+      
       // Skip hidden groups
       if (groupCfg.group_visible === false) continue
 
@@ -172,6 +173,7 @@ export default async function handler(req, res) {
     })
 
   } catch (err) {
+    console.error('Packages API error:', err)
     return res.status(500).json({ success: false, error: err.message })
   }
 }
