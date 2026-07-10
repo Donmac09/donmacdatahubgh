@@ -24,16 +24,16 @@ const GHDATA_TOKEN = process.env.GHDATA_API_TOKEN || '144|Upj7FsClobi8bIWLBWozmX
 // Package groups that are fulfilled manually by admin — NEVER sent to GHData
 const MANUAL_DELIVERY_GROUPS = new Set(['mtn_mashup', 'mtn_mashup_min'])
 
-// GHData accepts the network key in several casings/spellings depending on
-// account configuration — we try each candidate in order until one succeeds
+// GHData network candidates - corrected values
 const GHDATA_NETWORK_CANDIDATES = {
   mtn:             ['MTN', 'mtn'],
-  telecel:         ['TELECEL', 'telecel'],
-  airtel_bigtime:  ['AT_BIGTIME', 'AT-BIGTIME', 'atbigtime', 'at_bigtime', 'at-bigtime', 'AIRTELTIGO_BIGTIME'],
+  telecel:         ['TELECEL', 'telecel', 'VODAFONE', 'vodafone'],
+  airtel_bigtime:  ['AT_BIGTIME', 'AT-BIGTIME', 'atbigtime', 'at_bigtime', 'at-bigtime', 'AIRTELTIGO_BIGTIME', 'AIRTELTIGO'],
   airtel_premium:  [
     'AT_PREMIUM', 'AT-PREMIUM', 'AIRTELTIGO_PREMIUM', 'AIRTELTIGOPREMIUM',
     'AT_PREMIUM_BUNDLE', 'AIRTELTIGO_PREMIUM_BUNDLE', 'premium', 'PREMIUM',
     'atpremium', 'at_premium', 'at-premium', 'airteltigo_premium', 'airteltigopremium',
+    'AIRTELTIGO', 'airteltigo',
   ],
 }
 
@@ -45,6 +45,7 @@ function generateRef() {
 }
 
 function parseCapacityGB(dataLabel) {
+  if (!dataLabel) return null
   const match = String(dataLabel).match(/([0-9]+(?:\.[0-9]+)?)\s*GB/i)
   if (!match) return null
   return parseFloat(match[1])
@@ -71,16 +72,18 @@ async function getAuthedUser(req) {
     throw new Error('Your account has been blocked')
   }
 
-  if (profile.role === 'admin' || profile.role === 'reseller') {
-    console.log(`⚠️ ${profile.role} ${profile.email} placing order`)
-  }
-
   return profile
 }
 
 async function dispatchToGHData({ groupKey, phone, capacity, ref }) {
   const candidates = GHDATA_NETWORK_CANDIDATES[groupKey]
   if (!candidates) throw new Error(`No GHData network mapping for group "${groupKey}"`)
+
+  // Ensure capacity is a number
+  const numericCapacity = Number(capacity)
+  if (isNaN(numericCapacity) || numericCapacity <= 0) {
+    throw new Error(`Invalid capacity: ${capacity} (must be a positive number)`)
+  }
 
   const diagnostics = []
   let lastResult = null
@@ -92,14 +95,13 @@ async function dispatchToGHData({ groupKey, phone, capacity, ref }) {
       network: networkKey,
       reference: ref,
       msisdn: phone,
-      capacity,
+      capacity: numericCapacity,
     }
 
     console.log(`📤 GHData attempt ${networkKey}:`, JSON.stringify(requestBody))
 
-    let res, text
     try {
-      res = await fetch(url, {
+      const res = await fetch(url, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${GHDATA_TOKEN}`,
@@ -108,50 +110,55 @@ async function dispatchToGHData({ groupKey, phone, capacity, ref }) {
         },
         body: JSON.stringify(requestBody),
       })
-      text = await res.text()
-    } catch (networkErr) {
-      throw new Error(
-        `GHData request failed before a response was received (${networkErr.message}). URL: ${url}`
-      )
-    }
 
-    lastStatus = res.status
-    let json
-    try { json = JSON.parse(text) } catch { json = { raw: text } }
-    lastResult = json
+      const text = await res.text()
+      lastStatus = res.status
+      
+      let json
+      try { json = JSON.parse(text) } catch { json = { raw: text } }
+      lastResult = json
 
-    console.log(`📥 GHData response ${networkKey}:`, { status: res.status, body: json })
+      console.log(`📥 GHData response ${networkKey}:`, { status: res.status, body: json })
 
-    diagnostics.push({ networkKey, requestBody, status: res.status, response: json })
+      diagnostics.push({ networkKey, requestBody, status: res.status, response: json })
 
-    if (json?.success) {
-      const actualRef = json.data?.reference ?? json.data?.id ?? json.reference ?? ref
-      return {
-        success: true,
-        externalRef: String(actualRef),
-        matchedNetworkKey: networkKey,
-        debug: { url, diagnostics },
+      // Check if successful
+      if (res.ok && json?.success) {
+        const actualRef = json.data?.reference ?? json.data?.id ?? json.reference ?? ref
+        return {
+          success: true,
+          externalRef: String(actualRef),
+          matchedNetworkKey: networkKey,
+          debug: { url, diagnostics },
+        }
       }
-    }
 
-    const message = String(json?.message ?? '').toLowerCase()
-    const networkErrors = Array.isArray(json?.errors?.network)
-      ? json.errors.network.join(' ').toLowerCase()
-      : String(json?.errors?.network ?? '').toLowerCase()
-    const looksLikeNetworkKeyError =
-      res.status === 422 &&
-      (message.includes('validation') ||
+      // Check if this is a network validation error (try next candidate)
+      const message = String(json?.message ?? '').toLowerCase()
+      const networkErrors = Array.isArray(json?.errors?.network)
+        ? json.errors.network.join(' ').toLowerCase()
+        : String(json?.errors?.network ?? '').toLowerCase()
+      
+      const looksLikeNetworkKeyError =
+        res.status === 422 ||
+        message.includes('validation') ||
         networkErrors.includes('network') ||
         networkErrors.includes('invalid') ||
-        networkErrors.includes('selected')) ||
-      res.status === 404 ||
-      message.includes('network') ||
-      message.includes('not found') ||
-      message.includes('unsupported')
+        networkErrors.includes('selected') ||
+        message.includes('network') ||
+        message.includes('not found') ||
+        message.includes('unsupported')
 
-    if (!looksLikeNetworkKeyError) break
+      if (!looksLikeNetworkKeyError) break
+
+    } catch (error) {
+      console.error(`❌ GHData fetch error for ${networkKey}:`, error.message)
+      diagnostics.push({ networkKey, error: error.message })
+      // Continue to next candidate if it's a network error
+    }
   }
 
+  // All candidates exhausted
   const err = new Error(lastResult?.message || `GHData responded ${lastStatus} for all network key variants`)
   err.ghdataDebug = { lastStatus, lastResult, diagnostics }
   throw err
@@ -187,13 +194,21 @@ export default async function handler(req, res) {
       const isManual = MANUAL_DELIVERY_GROUPS.has(item.groupKey)
       const capacity = isManual ? null : parseCapacityGB(item.dataLabel)
 
-      console.log(`📦 Order ${ref}:`, { groupKey: item.groupKey, isManual, capacity, phone: item.phone })
+      console.log(`📦 Order ${ref}:`, { 
+        groupKey: item.groupKey, 
+        isManual, 
+        capacity, 
+        phone: item.phone,
+        dataLabel: item.dataLabel
+      })
 
+      // Check if this is an auto-delivery package but capacity couldn't be parsed
       if (!isManual && capacity === null) {
-        console.warn(`Could not parse capacity from "${item.dataLabel}" for group ${item.groupKey} — falling back to manual delivery`)
+        console.warn(`⚠️ Could not parse capacity from "${item.dataLabel}" for group ${item.groupKey} — falling back to manual delivery`)
       }
       const effectiveIsManual = isManual || capacity === null
 
+      // Create order
       const { data: order, error: orderErr } = await supabaseAdmin
         .from('orders')
         .insert({
@@ -216,6 +231,7 @@ export default async function handler(req, res) {
 
       if (orderErr) throw new Error(orderErr.message)
 
+      // Debit wallet
       const { error: debitErr } = await supabaseAdmin.rpc('credit_user', {
         p_user_id: profile.id,
         p_amount: -item.price,
@@ -223,6 +239,7 @@ export default async function handler(req, res) {
       })
       if (debitErr) throw new Error(debitErr.message)
 
+      // Notification
       await supabaseAdmin.from('notifications').insert({
         user_id: profile.id,
         title: 'Order Placed!',
@@ -230,13 +247,20 @@ export default async function handler(req, res) {
         type: 'order',
       })
 
+      // Dispatch to GHData if not manual
       if (!effectiveIsManual) {
         try {
           console.log(`🚀 Dispatching to GHData: ${ref}`)
+          
+          // Ensure capacity is a valid number before dispatching
+          if (!capacity || isNaN(capacity) || capacity <= 0) {
+            throw new Error(`Invalid capacity value: ${capacity}`)
+          }
+
           const result = await dispatchToGHData({
             groupKey: item.groupKey,
             phone: item.phone,
-            capacity,
+            capacity: capacity,
             ref,
           })
 
@@ -269,6 +293,7 @@ export default async function handler(req, res) {
             })
             .eq('id', order.id)
 
+          // Refund
           const { error: refundErr } = await supabaseAdmin.rpc('refund_failed_order', { p_order_id: order.id })
           if (refundErr) console.error('Auto-refund failed for order', ref, refundErr.message)
 
