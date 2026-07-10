@@ -14,18 +14,25 @@ export default async function handler(req, res) {
     return res.status(200).end()
   }
 
-  // GET request - Fetch balance
+  // ============================================================
+  // GET: Check balance (authenticated user)
+  // ============================================================
   if (req.method === 'GET') {
     try {
       const token = (req.headers.authorization || '').replace('Bearer ', '').trim()
       const { data: profile, error } = await supabase
         .from('profiles')
-        .select('balance, name, role')
+        .select('balance, name, role, status')
         .eq('api_token', token)
         .single()
       
       if (error || !profile) {
         return res.status(401).json({ error: 'Invalid token' })
+      }
+      
+      // Check if user is blocked
+      if (profile.status === 'blocked') {
+        return res.status(403).json({ error: 'Account blocked' })
       }
       
       return res.status(200).json({ 
@@ -38,24 +45,37 @@ export default async function handler(req, res) {
     }
   }
 
-  // POST request
+  // ============================================================
+  // POST: Admin actions (requires admin role)
+  // ============================================================
   if (req.method === 'POST') {
     try {
       const token = (req.headers.authorization || '').replace('Bearer ', '').trim()
       
+      // Verify admin
       const { data: admin, error: adminError } = await supabase
         .from('profiles')
-        .select('role')
+        .select('role, status')
         .eq('api_token', token)
         .single()
       
-      if (adminError || !admin || admin.role !== 'admin') {
+      if (adminError || !admin) {
+        return res.status(401).json({ error: 'Invalid token' })
+      }
+      
+      if (admin.status === 'blocked') {
+        return res.status(403).json({ error: 'Account blocked' })
+      }
+      
+      if (admin.role !== 'admin') {
         return res.status(403).json({ error: 'Admin access required' })
       }
 
       const { action, userId, amount } = req.body
       
-      // Wallet operations
+      // ============================================================
+      // Credit / Debit Wallet
+      // ============================================================
       if (action === 'credit' || action === 'debit') {
         if (!userId || !amount || isNaN(Number(amount)) || Number(amount) <= 0) {
           return res.status(400).json({ error: 'Valid userId and amount required' })
@@ -63,9 +83,10 @@ export default async function handler(req, res) {
         
         const numericAmount = Number(amount)
         
+        // Check if target user exists
         const { data: user, error: userError } = await supabase
           .from('profiles')
-          .select('balance')
+          .select('balance, name, email')
           .eq('id', userId)
           .single()
         
@@ -75,7 +96,6 @@ export default async function handler(req, res) {
         
         const currentBalance = user.balance || 0
         let newBalance
-        let updateError
         
         if (action === 'credit') {
           newBalance = currentBalance + numericAmount
@@ -83,7 +103,7 @@ export default async function handler(req, res) {
             .from('profiles')
             .update({ balance: newBalance })
             .eq('id', userId)
-          updateError = error
+          if (error) throw error
         } else {
           if (currentBalance < numericAmount) {
             return res.status(400).json({ error: 'Insufficient balance' })
@@ -93,10 +113,19 @@ export default async function handler(req, res) {
             .from('profiles')
             .update({ balance: newBalance })
             .eq('id', userId)
-          updateError = error
+          if (error) throw error
         }
         
-        if (updateError) throw updateError
+        // Record transaction
+        await supabase
+          .from('transactions')
+          .insert({
+            user_id: userId,
+            type: action,
+            description: `Admin ${action}: ${action === 'credit' ? 'added' : 'deducted'} ₵${numericAmount}`,
+            amount: numericAmount,
+            status: 'success'
+          })
         
         return res.status(200).json({
           success: true,
@@ -108,7 +137,9 @@ export default async function handler(req, res) {
         })
       }
       
-      // NEW: Process manual order
+      // ============================================================
+      // Complete Manual Order
+      // ============================================================
       if (action === 'complete_manual_order') {
         const { orderId, status, notes } = req.body
         
@@ -116,11 +147,22 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: 'orderId required' })
         }
         
+        // Check if order exists
+        const { data: existingOrder, error: checkError } = await supabase
+          .from('orders')
+          .select('id, status')
+          .eq('id', orderId)
+          .single()
+        
+        if (checkError || !existingOrder) {
+          return res.status(404).json({ error: 'Order not found' })
+        }
+        
         const { data: order, error: orderError } = await supabase
           .from('orders')
           .update({ 
             status: status || 'completed',
-            notes: notes || 'Manual delivery completed',
+            notes: notes || 'Manual delivery completed by admin',
             updated_at: new Date().toISOString()
           })
           .eq('id', orderId)
