@@ -67,16 +67,10 @@ async function getAuthedUser(req) {
     .single()
   if (profileErr || !profile) throw new Error('Profile not found')
   
-  // ============================================================
-  // SECURITY: Check if user is blocked
-  // ============================================================
   if (profile.status === 'blocked') {
     throw new Error('Your account has been blocked')
   }
 
-  // ============================================================
-  // SECURITY: Log admin/reseller orders for auditing
-  // ============================================================
   if (profile.role === 'admin' || profile.role === 'reseller') {
     console.log(`⚠️ ${profile.role} ${profile.email} placing order`)
   }
@@ -101,6 +95,8 @@ async function dispatchToGHData({ groupKey, phone, capacity, ref }) {
       capacity,
     }
 
+    console.log(`📤 GHData attempt ${networkKey}:`, JSON.stringify(requestBody))
+
     let res, text
     try {
       res = await fetch(url, {
@@ -123,6 +119,8 @@ async function dispatchToGHData({ groupKey, phone, capacity, ref }) {
     let json
     try { json = JSON.parse(text) } catch { json = { raw: text } }
     lastResult = json
+
+    console.log(`📥 GHData response ${networkKey}:`, { status: res.status, body: json })
 
     diagnostics.push({ networkKey, requestBody, status: res.status, response: json })
 
@@ -170,6 +168,8 @@ export default async function handler(req, res) {
     const profile = await getAuthedUser(req)
     const { items } = req.body || {}
 
+    console.log('📦 Order request:', { user: profile.id, items: items?.length })
+
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'No items provided' })
     }
@@ -186,6 +186,8 @@ export default async function handler(req, res) {
       const ref = generateRef()
       const isManual = MANUAL_DELIVERY_GROUPS.has(item.groupKey)
       const capacity = isManual ? null : parseCapacityGB(item.dataLabel)
+
+      console.log(`📦 Order ${ref}:`, { groupKey: item.groupKey, isManual, capacity, phone: item.phone })
 
       if (!isManual && capacity === null) {
         console.warn(`Could not parse capacity from "${item.dataLabel}" for group ${item.groupKey} — falling back to manual delivery`)
@@ -230,12 +232,15 @@ export default async function handler(req, res) {
 
       if (!effectiveIsManual) {
         try {
+          console.log(`🚀 Dispatching to GHData: ${ref}`)
           const result = await dispatchToGHData({
             groupKey: item.groupKey,
             phone: item.phone,
             capacity,
             ref,
           })
+
+          console.log(`✅ GHData success for ${ref}:`, result)
 
           await supabaseAdmin
             .from('orders')
@@ -249,7 +254,7 @@ export default async function handler(req, res) {
             .eq('id', order.id)
 
         } catch (ghErr) {
-          console.error('GHData dispatch failed for order', ref, ghErr.message)
+          console.error('❌ GHData dispatch failed for order', ref, ghErr.message)
 
           const debugInfo = ghErr.ghdataDebug
             ? JSON.stringify(ghErr.ghdataDebug)
@@ -295,7 +300,7 @@ export default async function handler(req, res) {
     return res.status(201).json({ success: true, orders: placedOrders })
 
   } catch (err) {
-    console.error('place order error:', err.message)
+    console.error('❌ place order error:', err.message)
     return res.status(400).json({ error: err.message || 'Failed to place order' })
   }
 }
