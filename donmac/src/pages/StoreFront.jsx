@@ -38,17 +38,28 @@ function StoreAuthScreen({ store, onAuth }) {
         onAuth(p)
       } else {
         // ============================================================
-        // SECURITY FIX: Registration - only send safe fields
+        // SECURITY FIX: Registration - REQUIRE reseller_id
         // ============================================================
-        if (!form.name || !form.email || !form.phone || !form.password) { setErr('All fields are required'); return }
-        if (form.password.length < 6) { setErr('Password must be at least 6 characters'); return }
+        if (!form.name || !form.email || !form.phone || !form.password) { 
+          setErr('All fields are required'); return 
+        }
+        if (form.password.length < 6) { 
+          setErr('Password must be at least 6 characters'); return 
+        }
+        
+        // ============================================================
+        // CRITICAL SECURITY: Ensure reseller_id is present
+        // ============================================================
+        if (!store?.reseller_id) {
+          setErr('This store is not properly configured. Please contact the store owner.')
+          return
+        }
         
         // Only send safe fields - NO role, NO admin flags
         const safeMeta = {
           name: form.name,
           phone: form.phone,
-          reseller_id: store.reseller_id
-          // role is NOT sent from frontend - server will set it to 'customer'
+          reseller_id: store.reseller_id  // MUST have reseller_id
         }
         
         const p = await register(form.email, form.password, safeMeta)
@@ -724,6 +735,9 @@ export default function StoreFront() {
     </div>
   )
 
+  // ============================================================
+  // SECURITY FIX: Check if store is valid before rendering
+  // ============================================================
   if (notFound || !store) return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 to-indigo-900">
       <div className="text-center text-white p-8">
@@ -733,6 +747,21 @@ export default function StoreFront() {
       </div>
     </div>
   )
+
+  // ============================================================
+  // SECURITY FIX: Check if reseller_id exists
+  // ============================================================
+  if (!store.reseller_id) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 to-indigo-900">
+        <div className="text-center text-white p-8">
+          <p className="text-6xl mb-4">🚫</p>
+          <h1 className="text-2xl font-bold">Store Configuration Error</h1>
+          <p className="text-slate-400 mt-2 text-sm">This store is not properly configured. Please contact the store owner.</p>
+        </div>
+      </div>
+    )
+  }
 
   if (store.reseller?.status === 'blocked') return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 to-indigo-900">
