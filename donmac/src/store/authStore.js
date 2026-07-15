@@ -29,7 +29,6 @@ const useAuthStore = create((set, get) => ({
         } catch {}
       } else if (event === 'SIGNED_OUT') {
         set({ user: null, profile: null, storefront: null })
-        // After state is cleared, redirect to login
         window.location.href = '/login'
       }
     })
@@ -43,42 +42,79 @@ const useAuthStore = create((set, get) => ({
   },
 
   // ============================================================
-  // FIX: Register - sanitize meta to prevent role injection
+  // FIX: Register - sanitize meta + block suspicious emails
   // ============================================================
-register: async (email, password, meta) => {
-  // ============================================================
-  // SECURITY FIX: Validate phone number on the backend
-  // ============================================================
-  if (!meta?.phone || meta.phone.trim().length < 10) {
-    throw new Error('A valid phone number is required (minimum 10 digits)')
-  }
-  
-  // Sanitize meta - only allow specific fields
-  const safeMeta = {
-    name: meta?.name || '',
-    phone: meta?.phone || '',
-    reseller_id: meta?.reseller_id || null,
-    // role is NOT sent from frontend - server will set it
-  }
-  
-  const data = await signUp(email, password, safeMeta)
-  if (data.user) {
-    await new Promise(r => setTimeout(r, 800))
-    try {
-      const profile = await getProfile(data.user.id)
-      set({ user: data.user, profile })
-      return profile
-    } catch {
-      set({ user: data.user })
+  register: async (email, password, meta) => {
+    // ============================================================
+    // SECURITY: Block suspicious email domains
+    // ============================================================
+    const blockedDomains = [
+      'donmacdatahub.com',
+      'donmacdatahubgh.com',
+      'donmacdatahubgh.vercel.app',
+    ]
+    
+    const blockedKeywords = [
+      'donmacdatahub',
+      'donmacdatahubgh',
+      'admin',
+      'root',
+      'test',
+    ]
+    
+    const emailLower = email.toLowerCase()
+    
+    // Check if email contains blocked domain
+    for (const domain of blockedDomains) {
+      if (emailLower.includes(domain)) {
+        throw new Error(`Registration with email from ${domain} is not allowed`)
+      }
     }
-  }
-  return data
-},
+    
+    // Check if email contains blocked keywords
+    for (const keyword of blockedKeywords) {
+      if (emailLower.includes(keyword)) {
+        throw new Error(`Email contains blocked keyword: ${keyword}`)
+      }
+    }
+    
+    // Block your exact email from being used by others
+    if (emailLower === 'donmacdatahub@gmail.com') {
+      throw new Error('This email is already registered as admin')
+    }
+    
+    // ============================================================
+    // SECURITY: Validate phone number on the backend
+    // ============================================================
+    if (!meta?.phone || meta.phone.trim().length < 10) {
+      throw new Error('A valid phone number is required (minimum 10 digits)')
+    }
+    
+    // Sanitize meta - only allow specific fields
+    const safeMeta = {
+      name: meta?.name || '',
+      phone: meta?.phone || '',
+      reseller_id: meta?.reseller_id || null,
+      // role is NOT sent from frontend - server will set it
+    }
+    
+    const data = await signUp(email, password, safeMeta)
+    if (data.user) {
+      await new Promise(r => setTimeout(r, 800))
+      try {
+        const profile = await getProfile(data.user.id)
+        set({ user: data.user, profile })
+        return profile
+      } catch {
+        set({ user: data.user })
+      }
+    }
+    return data
+  },
 
   logout: async () => {
     await signOut()
     set({ user: null, profile: null, storefront: null })
-    // Use setTimeout to ensure state is cleared before redirect
     setTimeout(() => {
       window.location.href = '/login'
     }, 100)
