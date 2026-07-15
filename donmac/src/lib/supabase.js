@@ -23,12 +23,18 @@ export async function signIn(email, password) {
 // FIX: Sanitize signUp - prevent role injection
 // ============================================================
 export async function signUp(email, password, meta) {
+  // ============================================================
+  // SECURITY FIX: Validate phone number on the backend
+  // ============================================================
+  if (!meta?.phone || meta.phone.trim().length < 10) {
+    throw new Error('A valid phone number is required (minimum 10 digits)')
+  }
+  
   // Only allow specific fields to be passed from frontend
   const safeMeta = {
     name: meta?.name || '',
     phone: meta?.phone || '',
     reseller_id: meta?.reseller_id || null,
-    // role is NOT allowed from frontend - forced to 'customer' on the server
   }
   
   // Add the role explicitly on the server
