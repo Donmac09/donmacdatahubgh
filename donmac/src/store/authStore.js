@@ -45,28 +45,35 @@ const useAuthStore = create((set, get) => ({
   // ============================================================
   // FIX: Register - sanitize meta to prevent role injection
   // ============================================================
-  register: async (email, password, meta) => {
-    // Sanitize meta - only allow specific fields
-    const safeMeta = {
-      name: meta?.name || '',
-      phone: meta?.phone || '',
-      reseller_id: meta?.reseller_id || null,
-      // role is NOT sent from frontend - server will set it
+register: async (email, password, meta) => {
+  // ============================================================
+  // SECURITY FIX: Validate phone number on the backend
+  // ============================================================
+  if (!meta?.phone || meta.phone.trim().length < 10) {
+    throw new Error('A valid phone number is required (minimum 10 digits)')
+  }
+  
+  // Sanitize meta - only allow specific fields
+  const safeMeta = {
+    name: meta?.name || '',
+    phone: meta?.phone || '',
+    reseller_id: meta?.reseller_id || null,
+    // role is NOT sent from frontend - server will set it
+  }
+  
+  const data = await signUp(email, password, safeMeta)
+  if (data.user) {
+    await new Promise(r => setTimeout(r, 800))
+    try {
+      const profile = await getProfile(data.user.id)
+      set({ user: data.user, profile })
+      return profile
+    } catch {
+      set({ user: data.user })
     }
-    
-    const data = await signUp(email, password, safeMeta)
-    if (data.user) {
-      await new Promise(r => setTimeout(r, 800))
-      try {
-        const profile = await getProfile(data.user.id)
-        set({ user: data.user, profile })
-        return profile
-      } catch {
-        set({ user: data.user })
-      }
-    }
-    return data
-  },
+  }
+  return data
+},
 
   logout: async () => {
     await signOut()
