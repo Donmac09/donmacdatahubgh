@@ -14,6 +14,15 @@ const useAuthStore = create((set, get) => ({
     if (session?.user) {
       try {
         const profile = await getProfile(session.user.id)
+        
+        // Check if user is blocked
+        if (profile?.status === 'blocked') {
+          await signOut()
+          set({ user: null, profile: null, loading: false })
+          window.location.href = '/login?blocked=true'
+          return
+        }
+        
         set({ user: session.user, profile, loading: false })
       } catch {
         set({ loading: false })
@@ -21,10 +30,20 @@ const useAuthStore = create((set, get) => ({
     } else {
       set({ loading: false })
     }
+    
     supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
         try {
           const profile = await getProfile(session.user.id)
+          
+          // Check if user is blocked
+          if (profile?.status === 'blocked') {
+            await signOut()
+            set({ user: null, profile: null, storefront: null })
+            window.location.href = '/login?blocked=true'
+            return
+          }
+          
           set({ user: session.user, profile })
         } catch {}
       } else if (event === 'SIGNED_OUT') {
@@ -37,79 +56,19 @@ const useAuthStore = create((set, get) => ({
   login: async (email, password) => {
     const data = await signIn(email, password)
     const profile = await getProfile(data.user.id)
+    
+    // Check if user is blocked
+    if (profile?.status === 'blocked') {
+      await signOut()
+      throw new Error('Your account has been blocked. Please contact support.')
+    }
+    
     set({ user: data.user, profile })
     return profile
   },
 
-  // ============================================================
-  // FIX: Register - sanitize meta + block suspicious emails
-  // ============================================================
   register: async (email, password, meta) => {
-    // ============================================================
-    // SECURITY: Block suspicious email domains
-    // ============================================================
-    const blockedDomains = [
-      'donmacdatahub.com',
-      'donmacdatahubgh.com',
-      'donmacdatahubgh.vercel.app',
-    ]
-    
-    const blockedKeywords = [
-      'donmacdatahub',
-      'donmacdatahubgh',
-      'admin',
-      'root',
-      'test',
-    ]
-    
-    const emailLower = email.toLowerCase()
-    
-    // Check if email contains blocked domain
-    for (const domain of blockedDomains) {
-      if (emailLower.includes(domain)) {
-        throw new Error(`Registration with email from ${domain} is not allowed`)
-      }
-    }
-    
-    // Check if email contains blocked keywords
-    for (const keyword of blockedKeywords) {
-      if (emailLower.includes(keyword)) {
-        throw new Error(`Email contains blocked keyword: ${keyword}`)
-      }
-    }
-    
-    // Block your exact email from being used by others
-    if (emailLower === 'donmacdatahub@gmail.com') {
-      throw new Error('This email is already registered as admin')
-    }
-    
-    // ============================================================
-    // SECURITY: Validate phone number on the backend
-    // ============================================================
-    if (!meta?.phone || meta.phone.trim().length < 10) {
-      throw new Error('A valid phone number is required (minimum 10 digits)')
-    }
-    
-    // Sanitize meta - only allow specific fields
-    const safeMeta = {
-      name: meta?.name || '',
-      phone: meta?.phone || '',
-      reseller_id: meta?.reseller_id || null,
-      // role is NOT sent from frontend - server will set it
-    }
-    
-    const data = await signUp(email, password, safeMeta)
-    if (data.user) {
-      await new Promise(r => setTimeout(r, 800))
-      try {
-        const profile = await getProfile(data.user.id)
-        set({ user: data.user, profile })
-        return profile
-      } catch {
-        set({ user: data.user })
-      }
-    }
-    return data
+    // ... your existing register code ...
   },
 
   logout: async () => {
@@ -124,12 +83,20 @@ const useAuthStore = create((set, get) => ({
     const { user } = get()
     if (!user) return
     const profile = await getProfile(user.id)
+    
+    // Check if user is blocked
+    if (profile?.status === 'blocked') {
+      await signOut()
+      set({ user: null, profile: null })
+      window.location.href = '/login?blocked=true'
+      return null
+    }
+    
     set({ profile })
     return profile
   },
 
   updateProfileLocal: (updates) => {
-    // Sanitize updates - prevent role changes from frontend
     const safeUpdates = { ...updates }
     delete safeUpdates.role
     delete safeUpdates.is_admin
