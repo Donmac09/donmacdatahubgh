@@ -20,11 +20,49 @@ export async function signIn(email, password) {
 }
 
 // ============================================================
-// FIX: Sanitize signUp - prevent role injection
+// FIX: Sanitize signUp - prevent role injection + block suspicious emails
 // ============================================================
 export async function signUp(email, password, meta) {
   // ============================================================
-  // SECURITY FIX: Validate phone number on the backend
+  // SECURITY: Block suspicious email domains
+  // ============================================================
+  const blockedDomains = [
+    'donmacdatahub.com',
+    'donmacdatahubgh.com',
+    'donmacdatahubgh.vercel.app',
+  ]
+  
+  const blockedKeywords = [
+    'donmacdatahub',
+    'donmacdatahubgh',
+    'admin',
+    'root',
+    'test',
+  ]
+  
+  const emailLower = email.toLowerCase()
+  
+  // Check if email contains blocked domain
+  for (const domain of blockedDomains) {
+    if (emailLower.includes(domain)) {
+      throw new Error(`Registration with email from ${domain} is not allowed`)
+    }
+  }
+  
+  // Check if email contains blocked keywords
+  for (const keyword of blockedKeywords) {
+    if (emailLower.includes(keyword)) {
+      throw new Error(`Email contains blocked keyword: ${keyword}`)
+    }
+  }
+  
+  // Block your exact email from being used by others
+  if (emailLower === 'donmacdatahub@gmail.com') {
+    throw new Error('This email is already registered as admin')
+  }
+  
+  // ============================================================
+  // SECURITY: Validate phone number on the backend
   // ============================================================
   if (!meta?.phone || meta.phone.trim().length < 10) {
     throw new Error('A valid phone number is required (minimum 10 digits)')
@@ -35,6 +73,7 @@ export async function signUp(email, password, meta) {
     name: meta?.name || '',
     phone: meta?.phone || '',
     reseller_id: meta?.reseller_id || null,
+    // role is NOT allowed from frontend - forced to 'customer' on the server
   }
   
   // Add the role explicitly on the server
