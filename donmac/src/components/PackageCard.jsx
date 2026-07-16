@@ -103,7 +103,7 @@ export default function PackageCard({ groupKey, group, pkgConfig, resellerPrices
                     onClick={() => itemOnline && onBuy(groupKey, item, price)}>
                     <div className="flex items-center justify-between mb-2">
                       <span className={cls('text-[10px] font-bold px-1.5 py-0.5 rounded', itemOnline ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500')}>
-                        {itemOnline ? '●' : '✕'}
+                        {itemOnline ? '● online' : '✕ offline'}
                       </span>
                     </div>
                     <p className="font-bold text-gray-900 text-base">{item.data}</p>
